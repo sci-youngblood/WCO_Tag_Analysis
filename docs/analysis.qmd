@@ -1,0 +1,359 @@
+---
+title: "WCO Tag ID Analysis"
+author: "Morgan Youngblood"
+date: "2024-06-06"
+format: html
+---
+
+# Introduction
+
+This document presents the analysis of the WCO dataset with Tag ID as of 06/06/24. General animal movement and summary analysis has been performed for the dataset. Some initial analysis has been performed to identify general trends and patterns in the data. These preliminary analysis hve observed the following:
+
+- Detections per transmitter
+- Detections per known species
+- Transmitters per species
+- Detections per station and island
+- Unique transmitters detected per station and island
+- Number of detections per transmitter at each station
+- Average detections per individual, standard error, and sample size for each station
+- Median detections per individual, standard error, and sample size for each station
+- Detections over time (and other general temporal patterns)
+
+Our analysis will pick up from here and further explore the data to identify any additional patterns or trends that may be present by looking closer at the variation within and among species data in this dataset. First, we will verify the data quality and then proceed with the analysis.
+
+We can start by looking at the number of unique transmitters in the dataset to make sure that the data is complete and that we have all the necessary information to proceed with the analysis.
+
+# load necessary libraries
+```{r load-libraries, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+
+```
+
+# Data Quality Check
+```{r data-quality-check, echo=TRUE, eval=TRUE}
+
+# Load Sorted Tag ID data
+Tag_Data <- read.csv("data/sorted_Tag_Data.csv")
+
+str(Tag_Data)
+
+# Load WCO Reciever with Tag ID data
+WCO <- read.csv("data/WCO_with_Tag_ID_6_6_24.csv")
+
+# count the number of unique transmitters in Tag_Data 
+unique_transmitter_Tag_Data <- Tag_Data %>%
+  summarise(unique_count = n_distinct(Transmitter))
+
+print(unique_transmitter_Tag_Data)
+
+# count the number of unique transmitters in WCO 
+unique_transmitter_WCO <- WCO %>% 
+    summarise(unique_count = n_distinct(Transmitter))
+
+print(unique_transmitter_WCO)
+
+
+```
+
+# We see 253 unique transmitters in the Tag Data and 305 unique transmitters in the WCO data. This is fine because the Tag Data is a subset of the WCO data. We can proceed with the analysis.
+
+# Abacus Plots for Species
+
+## Myliobatis californica
+```{r abacus-Myliobatis, echo=TRUE, eval=TRUE}
+
+# check the number of transmitters associated with Mylobatis californica
+Number_of_Myliobatis <- WCO %>%
+  filter(SciName == "Myliobatis californica") %>%
+  summarise(Transmitter_count = n_distinct(Transmitter))
+
+  print(Number_of_Myliobatis)
+
+# Filter the dataset for the specific species
+Filtered_Myliobatis <- WCO %>%
+  filter(SciName == "Myliobatis californica")
+
+# Create a vector of custom colors and shapes for each individual
+custom_colors <- c("#C58ABB", "#B73944", "#8ACE89", "#C15901", "#0072B2", 
+                   "#656565", "#009E73", "#56B4E9", "#E69F00", "#000000")
+shapes <- c(15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+
+# Convert 'Date' from character to Date format in the Filtered_Myliobatis dataframe
+Filtered_Myliobatis <- Filtered_Myliobatis %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
+
+  # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the individuals labeled with unique colors and shapes.
+
+# Filter data for pre 2020
+Filtered_Myliobatis_pre_2020 <- Filtered_Myliobatis %>% 
+  filter(Date < as.Date("2020-01-01"))
+
+# Plot for pre 2020
+mylobatis_abacus_pre_2020 <- ggplot(Filtered_Myliobatis_pre_2020, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(width = 0.5, height = 0.3, alpha = 1) +
+  geom_point(size = 5) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  scale_y_date(breaks = scales::date_breaks("1 month"), labels = scales::date_format("%Y-%m-%d")) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+        axis.text.y = element_text(size = 12), # Increase size of y-axis text
+        axis.title = element_text(size = 14), # Increase size of axis titles
+        plot.title = element_text(hjust = 0.5, size = 16), # Increase size of plot title
+        legend.text = element_text(size = 12), # Increase size of legend text
+        legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Myliobatis californica (Pre 2020)",
+       x = "Island",
+       y = "Date",
+       color = "Ray",
+       shape = "Ray")
+
+print(mylobatis_abacus_pre_2020)
+
+ggsave("outputs/Abacus_Plot_Myliobatis_Pre_2020.png", plot = mylobatis_abacus_pre_2020, width = 10, height = 15, dpi = 300, units = "in")
+
+# Filter data for post 2020
+Filtered_Myliobatis_post_2020 <- Filtered_Myliobatis %>% 
+  filter(Date >= as.Date("2020-01-01"))
+
+# Plot for post 2020
+mylobatis_abacus_post_2020 <- ggplot(Filtered_Myliobatis_post_2020, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(width = 0.5, height = 0.3, alpha = 1) +
+  geom_point(size = 5) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  scale_y_date(breaks = scales::date_breaks("1 month"), labels = scales::date_format("%Y-%m-%d")) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+      axis.text.y = element_text(size = 12), # Increase size of y-axis text
+      axis.title = element_text(size = 14), # Increase size of axis titles
+      plot.title = element_text(hjust = 0.5, size = 16), # Correctly set size of plot title
+      legend.text = element_text(size = 12), # Increase size of legend text
+      legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Myliobatis californica (Post 2020)",
+       x = "Island",
+       y = "Date",
+       color = "Ray",
+       shape = "Ray")
+
+print(mylobatis_abacus_post_2020)
+ggsave("outputs/Abacus_Plot_Myliobatis_Post_2020.png", plot = mylobatis_abacus_post_2020, width = 10, height = 15, dpi = 300, units = "in")
+
+```
+
+## Triakis semifasciata, Seriola lalandi, Stereolepis gigas, and Pseudobatos productus.
+```{r abacus-Triakis-Seriola-Stereolepis-Pseudobatos, echo=TRUE, eval=TRUE}
+
+# Filter the dataset for the specific species
+Filtered_Multi_Species <- WCO %>%
+  filter(SciName == "Triakis semifasciata" | SciName == "Seriola lalandi" | SciName == "Stereolepis gigas" | SciName == "Pseudobatos productus")
+
+# Create a vector of custom colors and shapes for each species
+custom_colors <- c("#C58ABB", "#B73944", "#8ACE89", "#C15901")
+shapes <- c(15, 16, 17, 18)
+
+# Convert 'Date' from character to Date format in the Filtered_Multi_Species dataframe
+Filtered_Multi_Species <- Filtered_Multi_Species %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
+
+# Filter for detections where Island is NA
+Filtered_Multi_Species <- Filtered_Multi_Species %>%
+  filter(!is.na(Island))
+
+  # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the species labeled with unique colors and shapes.
+  
+  # Plot
+Abacus_Multi_Species <- ggplot(Filtered_Multi_Species, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = SciName, shape = SciName)) +
+  geom_jitter(width = 0.5, height = 0.3, alpha = 1) +
+  geom_point(size = 5) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  scale_y_date(breaks = scales::date_breaks("1 year"), labels = scales::date_format("%Y-%m-%d")) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+      axis.text.y = element_text(size = 12), # Increase size of y-axis text
+      axis.title = element_text(size = 14), # Increase size of axis titles
+      plot.title = element_text(hjust = 0.5, size = 16), # Correctly set size of plot title
+      legend.text = element_text(size = 12), # Increase size of legend text
+      legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Triakis semifasciata, Seriola lalandi, Stereolepis gigas, and Pseudobatos productus",
+       x = "Island",
+       y = "Date",
+       color = "Species",
+       shape = "Species")
+
+print(Abacus_Multi_Species)
+
+ggsave("outputs/Abacus_Plot_Multi_Species.png", plot = Abacus_Multi_Species, width = 10, height = 15, dpi = 300, units = "in")
+
+```
+
+## Galeorhinus galeus
+```{r abacus-Galeorhinus, echo=TRUE, eval=TRUE}
+
+# Filter the dataset for the specific species
+Filtered_Galeorhinus <- WCO %>%
+  filter(SciName == "Galeorhinus galeus")
+
+# Create a vector of custom colors and shapes for each individual (We have 31 individuals)
+custom_colors <- c("#000000", "grey", "#D7792C", "#D79C2C", "#D7BB2C", 
+                   "#D7D42C", "#BFD72C", "#A3D72C", "#7CD72C", "#3AD72C",
+                   "#2CD779", "#2CD79F", "#2CD7BF", "#2CCDD7", "#2CA6D7", 
+                   "#2C83D7", "#2C60D7", "#2C41D7", "#672CD7", "#8A2CD7",
+                   "#AD2CD7", "#CD2CD7", "#D72CA3", "#D72C80", "#D72C60", 
+                   "#D72C3A", "#D7592C", "#D7792C", "#D79C2C", "#D7BB2C", "#D7D42C")
+shapes <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+
+# Convert 'Date' from character to Date format in the Filtered_Galeorhinus dataframe
+Filtered_Galeorhinus <- Filtered_Galeorhinus %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
+
+# Filter for detections where Island is NA
+Filtered_Galeorhinus <- Filtered_Galeorhinus %>%
+  filter(!is.na(Island))
+
+  # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the individuals labeled with unique colors and shapes.
+  
+  # Plot
+  Abacus_Galeorhinus <- ggplot(Filtered_Galeorhinus, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(width = 0.3, height = 0.4, alpha = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  guides(color = guide_legend(ncol = 1), shape = guide_legend(ncol = 1)) +
+  scale_y_date(breaks = scales::date_breaks("1 year"), labels = scales::date_format("%Y-%m-%d")) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+      axis.text.y = element_text(size = 12), # Increase size of y-axis text
+      axis.title = element_text(size = 14), # Increase size of axis titles
+      plot.title = element_text(hjust = 0.5, size = 16), # Correctly set size of plot title
+      legend.text = element_text(size = 12), # Increase size of legend text
+      legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Galeorhinus galeus",
+       x = "Island",
+       y = "Date",
+       color = "Shark",
+       shape = "Shark")
+
+print(Abacus_Galeorhinus)
+
+ggsave("outputs/Abacus_Plot_Galeorhinus.png", plot = Abacus_Galeorhinus, width = 10, height = 15, dpi = 300, units = "in")
+
+```
+
+# Carcharodon carcharias
+```{r abacus-Carcharodon, echo=TRUE, eval=TRUE}
+
+# Filter the dataset for the specific species
+Filtered_Carcharodon <- WCO %>%
+  filter(SciName == "Carcharodon carcharias")
+
+# Create a vector of custom shapes to represent sex for the species. 
+shapes <- c(1, 3, 2)
+
+# Convert 'Date' from character to Date format in the Filtered_Carcharodon dataframe
+Filtered_Carcharodon <- Filtered_Carcharodon %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
+
+# Filter for detections where Island is NA
+Filtered_Carcharodon <- Filtered_Carcharodon %>%
+  filter(!is.na(Island))
+
+# Filter for detections where sex is NA
+Filtered_Carcharodon <- Filtered_Carcharodon %>%
+  filter(!is.na(sex))
+
+# Filter for detections where TNL_cm is NA
+Filtered_Carcharodon <- Filtered_Carcharodon %>%
+  filter(!is.na(TNL_cm))
+
+  # Find the minimum and maximum values of 'TNL_cm' for Carcharodon carcharias. 
+min_max_TNL_cm <- Filtered_Carcharodon %>%
+  summarise(min_TNL_cm = min(TNL_cm), max_TNL_cm = max(TNL_cm))
+
+print(min_max_TNL_cm)
+
+# Format when_encountered as Date
+Filtered_Carcharodon$when_encountered <- as.Date(Filtered_Carcharodon$when_encountered, format = "%Y-%m-%d")
+
+# Create column for adjusted 'TNL_cm' values to account for growth. The species grows 45cm per year until they reach 180cm, then 12cm per year until they reach 330cm. We can keep the values above 330cm as is.
+
+Filtered_Carcharodon$TNL_cm_adjusted <- Filtered_Carcharodon$TNL_cm
+
+# Calculate the number of days since the when_encountered date for each detection
+Filtered_Carcharodon$days_since_encountered <- as.numeric(difftime(Filtered_Carcharodon$Date, Filtered_Carcharodon$when_encountered, units = "days"))
+
+# Adjust TNL_cm based on the conditions
+Filtered_Carcharodon$TNL_cm_adjusted[Filtered_Carcharodon$TNL_cm < 180] <- Filtered_Carcharodon$TNL_cm[Filtered_Carcharodon$TNL_cm < 180] + 0.12328767 * Filtered_Carcharodon$days_since_encountered[Filtered_Carcharodon$TNL_cm < 180]
+Filtered_Carcharodon$TNL_cm_adjusted[Filtered_Carcharodon$TNL_cm >= 180 & Filtered_Carcharodon$TNL_cm < 331] <- Filtered_Carcharodon$TNL_cm[Filtered_Carcharodon$TNL_cm >= 180 & Filtered_Carcharodon$TNL_cm < 331] + 0.03287671 * Filtered_Carcharodon$days_since_encountered[Filtered_Carcharodon$TNL_cm >= 180 & Filtered_Carcharodon$TNL_cm < 331]
+
+
+  # Create a new variable 'life_stage' based on 'TNL_cm'
+Filtered_Carcharodon$life_stage <- cut(Filtered_Carcharodon$TNL_cm_adjusted, 
+                                       breaks = c(-Inf, 180, 330, Inf), 
+                                       labels = c("YOY", "Juvenile", "Adult"))
+
+# Create a vector of custom colors
+custom_colors <- c("YOY" = "#03C41F", "Juvenile" = "#031FC4", "Adult" = "#C4030F")
+
+  # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the individuals labeled with unique colors and shapes.
+  
+  # Plot
+  Abacus_Carcharodon <- ggplot(Filtered_Carcharodon, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = life_stage, shape = sex)) +
+  geom_jitter(width = 0.3, height = 0.4, alpha = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  guides(color = guide_legend(ncol = 1), shape = guide_legend(ncol = 1)) +
+  scale_y_date(breaks = scales::date_breaks("1 year"), labels = scales::date_format("%Y-%m-%d")) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+      axis.text.y = element_text(size = 12), # Increase size of y-axis text
+      axis.title = element_text(size = 14), # Increase size of axis titles
+      plot.title = element_text(hjust = 0.5, size = 16), # Correctly set size of plot title
+      legend.text = element_text(size = 12), # Increase size of legend text
+      legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Carcharodon carcharias",
+       x = "Island",
+       y = "Date",
+       color = "Life Stage",
+       shape = "Sex")
+
+print(Abacus_Carcharodon)
+
+# Save the plot
+ggsave("outputs/Abacus_Plot_Carcharodon.png", plot = Abacus_Carcharodon, width = 10, height = 15, dpi = 300, units = "in")
+
+# Make a table with the following parameters for each individual: when_encountered, date first detected, date last detected, and detections per life stage with columns for (YOY, Juvenile, Adult).
+ Filtered_Carcharodon_table <- Filtered_Carcharodon %>%
+  group_by(Transmitter) %>%
+  summarise(
+    when_encountered = min(when_encountered),
+    date_first_detected = min(Date),
+    date_last_detected = max(Date),
+    TNL_cm = mean(TNL_cm, na.rm = TRUE), # Add TNL_cm column
+    YOY_detections = sum(life_stage == "YOY"),
+    Juvenile_detections = sum(life_stage == "Juvenile"),
+    Adult_detections = sum(life_stage == "Adult")
+  ) %>%
+  arrange(TNL_cm) # Sort by TNL_cm in ascending order
+
+  print(Filtered_Carcharodon_table)
+
+  # Write the table to a csv file
+write.csv(Filtered_Carcharodon_table, "data/Carcharodon_Life_Stage_table.csv", row.names = FALSE)
+
+```
+
