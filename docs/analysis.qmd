@@ -52,9 +52,6 @@ library(fuzzyjoin)
 ```
 
 
-
-```
-
 # Data Quality Check
 ```{r data-quality-check, echo=TRUE, eval=TRUE}
 
@@ -289,7 +286,7 @@ ggsave("outputs/Abacus_Plot_Galeorhinus.png", plot = Abacus_Galeorhinus, width =
 
 ```
 
-# Carcharodon carcharias
+## Carcharodon carcharias
 ```{r abacus-Carcharodon, echo=TRUE, eval=TRUE}
 
 # Filter the dataset for the specific species
@@ -349,7 +346,7 @@ custom_colors <- c("YOY" = "#03C41F", "Juvenile" = "#031FC4", "Adult" = "#C4030F
   # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the individuals labeled with unique colors and shapes.
   
   # Plot
-  Abacus_Carcharodon <- ggplot(Filtered_Carcharodon, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa")), y = Date, color = life_stage, shape = sex)) +
+  Abacus_Carcharodon <- ggplot(Filtered_Carcharodon, aes(x = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Mainland", "Anacapa", "Santa Barbara")), y = Date, color = life_stage, shape = sex)) +
   geom_jitter(width = 0.3, height = 0.4, alpha = 1) +
   geom_point(size = 3) +
   scale_color_manual(values = custom_colors) +
@@ -396,7 +393,7 @@ write.csv(Filtered_Carcharodon_table, "data/Carcharodon_Life_Stage_table.csv", r
 
 ```
 
-# Make a movie for shark A69-9001-13501 
+### Make a movie for shark A69-9001-13501 
 ```{r shark-movie-13501, echo=TRUE, eval=TRUE}
 
 # Filter the data for the specific shark transmitter
@@ -408,16 +405,16 @@ islands <- st_read("data/cinms_py2/cinms_py.shp")
 coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
 
 # Create a Daily column for easier plotting
-detections_per_station_daily_13510 <- A69_9001_13501 %>%
+detections_per_station_daily_13501 <- A69_9001_13501 %>%
   mutate(Daily = as.Date(Date)) %>%
   group_by(Longitude, Latitude, Island, Year = year(Daily), Daily) %>%
   summarise(Detections = n(), TNL_cm_adjusted = mean(TNL_cm_adjusted)) %>%
   ungroup()
 
-base_plot_13510 <- ggplot() + 
+base_plot_13501 <- ggplot() + 
   geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
   geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
-  geom_point(data = detections_per_station_daily_13510, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted), size = 5) +
+  geom_point(data = detections_per_station_daily_13501, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted), size = 5) +
   scale_color_gradient(low = "yellow", high = "red") +  # Set the color gradient from red to yellow
   coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
   theme_minimal() +
@@ -429,16 +426,16 @@ base_plot_13510 <- ggplot() +
   labs(x = "Longitude", y = "Latitude", color = "Total Length (cm)")
 
 # Create the animation
-animation_plot_13510 <- base_plot_13510 +
-  geom_point(data = detections_per_station_daily_13510, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted, size = Detections)) +
-  transition_states(states = Daily, transition_length = 2, state_length = 5) +
-  labs(title = paste("Detections per Station:", "{closest_state}"))
+animation_plot_13501 <- base_plot_13501 +
+  geom_point(data = detections_per_station_daily_13501, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted)) +
+  transition_states(states = Daily, transition_length = 20, state_length = 20) +
+  labs(title = paste("Detections M 13501:", "{closest_state}"))
 ```
 
-### Animate 13510 and save
+#### Animate 13510 and save
 ```{r, eval=FALSE}
 
-animate(animation_plot_13510, nframes = length(unique(as.vector(detections_per_station_daily_13510$Daily))), fps = 5, width = 800, height = 600, renderer = gifski_renderer("outputs/13510_animation.gif"))
+animate(animation_plot_13501, nframes = length(unique(as.vector(detections_per_station_daily_13501$Daily))), fps = 3, width = 800, height = 600, renderer = gifski_renderer("outputs/13501_animation.gif"))
 
 # Set levels for stations based on longitude (West to East)
 station_order <- A69_9001_13501 %>%
@@ -453,15 +450,232 @@ A69_9001_13501 <- A69_9001_13501 %>%
   mutate(Station.Name = factor(Station.Name, levels = station_order))
 
 # Create abacus for 13510
-Abacus_13510 <- ggplot(A69_9001_13501, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = TNL_cm_adjusted)) +
+Abacus_13501 <- ggplot(A69_9001_13501, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = TNL_cm_adjusted)) +
   geom_point(shape = 19, size = 5) +
   scale_color_viridis_c(option = "plasma", direction = -1) +
   labs(title = "Abacus Plot for 13510", x = "Station", y = "Date", color = "TNL") +
   theme_minimal() +
   theme(text = element_text(size = 20),
-        axis.text.x = element_text(angle = 45, hjust = 1))
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "darkgrey"),
+        plot.background = element_rect(fill = "darkgrey"))
 
-print(Abacus_13510)
-ggsave("outputs/Abacus_Plot_13510.png", plot = Abacus_13510, width = 10, height = 15, dpi = 300, units = "in")
+print(Abacus_13501)
+ggsave("outputs/Abacus_Plot_13501.png", plot = Abacus_13501, width = 10, height = 15, dpi = 300, units = "in")
 
+```
+
+## Ok, now that we know how to do this, let's look at some other Charcarodon carcharias transmitters that may be of interest.
+
+### Identify the unique transmitters for Carcharodon carcharias with the greatest detection span and the greatest number of detections.
+```{r shark-summary, echo=TRUE, eval=TRUE}
+
+# Find the unique transmitters for Carcharodon carcharias with the greatest detection span
+Carcharodon_span <- Filtered_Carcharodon %>%
+  group_by(Transmitter) %>%
+  summarize(First_Detection = min(Date),
+            Last_Detection = max(Date),
+            Detection_Span = as.numeric(max(Date) - min(Date)),
+            Number_of_Detections = n()) %>%
+  arrange(desc(Detection_Span))
+
+View(Carcharodon_span)
+
+```
+
+### Make a movie for shark A69-1601-30029 
+```{r shark-movie-30029, echo=TRUE, eval=TRUE}
+
+# Filter the data for the specific shark transmitter
+A69_1601_30029 <- Filtered_Carcharodon %>% 
+  filter(Transmitter == "A69-1601-30029")
+
+# Create a Daily column for easier plotting
+detections_per_station_daily_30029 <- A69_1601_30029 %>%
+  mutate(Daily = as.Date(Date)) %>%
+  group_by(Longitude, Latitude, Island, Year = year(Daily), Daily) %>%
+  summarise(Detections = n(), TNL_cm_adjusted = mean(TNL_cm_adjusted)) %>%
+  ungroup()
+
+base_plot_30029 <- ggplot() + 
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_daily_30029, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted), size = 5) +
+  scale_color_gradient(low = "yellow", high = "red") +  # Set the color gradient from red to yellow
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(x = "Longitude", y = "Latitude", color = "Total Length (cm)")
+
+# Create the animation
+animation_plot_30029 <- base_plot_30029 +
+  geom_point(data = detections_per_station_daily_30029, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted)) +
+  transition_states(states = Daily, transition_length = 20, state_length = 20) +
+  labs(title = paste("Detections M 30029:", "{closest_state}"))
+  ```
+
+#### Animate 30029 and save
+```{r, eval=FALSE}
+animate(animation_plot_30029, nframes = length(unique(as.vector(detections_per_station_daily_30029$Daily))), fps = 3, width = 800, height = 600, renderer = gifski_renderer("outputs/30029_animation.gif"))
+
+# Set levels for stations based on longitude (West to East)
+station_order <- A69_1601_30029 %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+# Remove duplicated levels
+station_order <- unique(station_order)
+
+# Convert Island and Station Name to factors with specified order
+A69_1601_30029 <- A69_1601_30029 %>%
+  mutate(Station.Name = factor(Station.Name, levels = station_order))
+
+# Create abacus for 30029
+Abacus_30029 <- ggplot(A69_1601_30029, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = TNL_cm_adjusted)) +
+  geom_point(shape = 19, size = 5) +
+  scale_color_viridis_c(option = "plasma", direction = -1) +
+  labs(title = "Abacus Plot for 30029", x = "Station", y = "Date", color = "TNL") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "darkgrey"),
+        plot.background = element_rect(fill = "darkgrey"))
+
+print(Abacus_30029)
+ggsave("outputs/Abacus_Plot_30029.png", plot = Abacus_30029, width = 10, height = 15, dpi = 300, units = "in")
+```
+
+### Make a movie for shark A69-9001-24384 
+```{r shark-movie-24384, echo=TRUE, eval=TRUE}
+
+# Filter the data for the specific shark transmitter
+A69_9001_24384 <- Filtered_Carcharodon %>% 
+  filter(Transmitter == "A69-9001-24384")
+
+# Create a Daily column for easier plotting
+detections_per_station_daily_24384 <- A69_9001_24384 %>%
+  mutate(Daily = as.Date(Date)) %>%
+  group_by(Longitude, Latitude, Island, Year = year(Daily), Daily) %>%
+  summarise(Detections = n(), TNL_cm_adjusted = mean(TNL_cm_adjusted)) %>%
+  ungroup()
+
+base_plot_24384 <- ggplot() + 
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_daily_24384, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted), size = 5) +
+  scale_color_gradient(low = "yellow", high = "red") +  # Set the color gradient from red to yellow
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(x = "Longitude", y = "Latitude", color = "Total Length (cm)")
+
+# Create the animation
+animation_plot_24384 <- base_plot_24384 +
+  geom_point(data = detections_per_station_daily_24384, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted)) +
+  transition_states(states = Daily, transition_length = 20, state_length = 20) +
+  labs(title = paste("Detections M 24384:", "{closest_state}"))
+  ```
+
+#### Animate 24384 and save
+```{r, eval=FALSE}
+animate(animation_plot_24384, nframes = length(unique(as.vector(detections_per_station_daily_24384$Daily))), fps = 3, width = 800, height = 600, renderer = gifski_renderer("outputs/24384_animation.gif"))
+
+# Set levels for stations based on longitude (West to East)
+station_order <- A69_9001_24384 %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+# Remove duplicated levels
+station_order <- unique(station_order)
+
+# Convert Island and Station Name to factors with specified order
+A69_9001_24384 <- A69_9001_24384 %>%
+  mutate(Station.Name = factor(Station.Name, levels = station_order))
+
+# Create abacus for 24384
+Abacus_24384 <- ggplot(A69_9001_24384, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = TNL_cm_adjusted)) +
+  geom_point(shape = 19, size = 5) +
+  scale_color_viridis_c(option = "plasma", direction = -1) +
+  labs(title = "Abacus Plot for 24384", x = "Station", y = "Date", color = "TNL") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "darkgrey"),
+        plot.background = element_rect(fill = "darkgrey"))
+
+print(Abacus_24384)
+ggsave("outputs/Abacus_Plot_24384.png", plot = Abacus_24384, width = 10, height = 15, dpi = 300, units = "in")
+
+```
+
+### Make a movie for all three sharks 
+```{r shark-movie-all, echo=TRUE, eval=TRUE}
+
+# Filter the data for the specific shark transmitters
+male_cohort <- Filtered_Carcharodon %>% 
+  filter(Transmitter %in% c("A69-1601-30029", "A69-9001-24384", "A69-9001-13501"))
+
+# Create a Daily column for easier plotting
+detections_per_station_daily_mcoh <- male_cohort %>%
+  mutate(Daily = as.Date(Date)) %>%
+  group_by(Longitude, Latitude, Island, Year = year(Daily), Daily, Transmitter) %>%
+  summarise(Detections = n(), TNL_cm_adjusted = mean(TNL_cm_adjusted)) %>%
+  ungroup()
+
+base_plot_mcoh <- ggplot() + 
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_daily_mcoh, aes(x = Longitude, y = Latitude, color = Transmitter), size = 5) +
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(x = "Longitude", y = "Latitude", color = "Shark")
+
+# Create the animation
+animation_plot_mcoh <- base_plot_mcoh +
+  geom_point(data = detections_per_station_daily_mcoh, aes(x = Longitude, y = Latitude, color = Transmitter)) +
+  transition_states(states = Daily, transition_length = 20, state_length = 20) +
+  labs(title = paste("Detections Male Cohort:", "{closest_state}"))
+```
+
+#### Animate all three sharks and save
+```{r, eval=FALSE}
+animate(animation_plot_mcoh, nframes = length(unique(as.vector(detections_per_station_daily_mcoh$Daily))), fps = 3, width = 800, height = 600, renderer = gifski_renderer("outputs/male_cohort_animation.gif"))
+
+# Set levels for stations based on longitude (West to East)
+station_order <- male_cohort %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+# Remove duplicated levels
+station_order <- unique(station_order)
+
+# Convert Island and Station Name to factors with specified order
+male_cohort <- male_cohort %>%
+  mutate(Station.Name = factor(Station.Name, levels = station_order))
+
+# Create abacus for all
+Abacus_mcoh <- ggplot(male_cohort, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = Transmitter)) +
+  geom_point(shape = 19, size = 5) +
+  labs(title = "Abacus Plot Male Cohort", x = "Station", y = "Date", color = "Shark") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "darkgrey"),
+        plot.background = element_rect(fill = "darkgrey"))
+
+print(Abacus_mcoh)
+ggsave("outputs/Abacus_Male_Cohort.png", plot = Abacus_mcoh, width = 10, height = 15, dpi = 300, units = "in")
 ```
