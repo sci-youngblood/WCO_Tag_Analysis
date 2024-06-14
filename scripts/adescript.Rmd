@@ -1,0 +1,627 @@
+---
+title: "ADE Script"
+author: "MORGAN YOUNGBLOOD"
+date: "05/10/2024"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Install packages
+```{r, eval=FALSE}
+
+install.packages("adehabitatHR")
+install.packages("adehabitatHS")
+install.packages("adehabitatLT")
+install.packages("adehabitatMA")
+install.packages("deldir")
+
+```
+
+
+# Load packages
+```{r}
+
+library(adehabitatHR)
+library(adehabitatHS)
+library(adehabitatLT)
+library(adehabitatMA)
+library(deldir)
+
+```
+
+
+# All the home-range estimation methods included in the package can take an object belonging to one of these two classes as the argument xy. For example, generate a sample of relocations uniformly distributed on the plane:
+
+```{r}
+
+xy <- matrix(runif(60), ncol=2)
+head(xy)
+
+# The object xy is a matrix containing 30 relocations of a virtual animal. Convert it into the class SpatialPoints:
+
+xysp <- SpatialPoints(xy)
+
+clu <- clusthr(xysp)
+class(clu)
+
+# Show the results:
+plot(clu)
+
+# Now, consider the relocations of another animal:
+xy2 <- matrix(runif(60), ncol=2)
+
+# We can bind the two matrices together:
+xyt <- rbind(xy, xy2)
+
+# and generate a vector containing the ID of the animals for each relocation of the object xyt:
+id <- gl(2,30)
+
+#We can convert the object id into a SpatialPointsDataFrame:
+idsp <- data.frame(id)
+coordinates(idsp) <- xyt
+class(idsp)
+
+#And we can use the same function clusthr on this new object:
+clu2 <- clusthr(idsp)
+class(clu2)
+
+clu2
+
+# An object of the class "MCHu" is basically a list of objects of class SpatialPolygonsDataFrame, with one element per animal. Thus:
+length(clu2)
+
+class(clu2[[1]])
+
+class(clu2[[2]])
+
+```
+
+# Although each SpatialPolygonsDataFrame of the list can be easily handled by the functions of the package sp, the package adehabitatHR also contains functions allowing to deal with such lists. For example:
+
+```{r}
+
+plot(clu2)
+
+
+```
+
+# Therefore, the same home-range estimating function can accept an object of class SpatialPoints (one animal) or SpatialPointsDataFrame (several animals). This is the case of all home-range estimation methods in adehabitatHR.
+
+
+# **2.2 Our example data set** I will illustrate the use of the functions in adehabitatHR using a subset of the data collected by Daniel Maillard (1996; Office national de la chasse et de la faune sauvage, Montpellier) on the wild boar at Puechabon (near Montpellier,South of France). First load the dataset puechabonsp:
+```{r}
+
+data(puechabonsp)
+names(puechabonsp)
+
+# This dataset is a list with two components: the component relocs is a SpatialPointsDataFrame containing the relocations of four wild boars monitored using radio-tracking. The following variables are available for each relocations:
+
+head(as.data.frame(puechabonsp$relocs))
+
+#The component map is a SpatialPixelsDataFrame containing the maps of four environmental variables on the study area (Elevation, slope, aspect and herbaceous cover)
+
+## Map of the elevation
+image(puechabonsp$map, col=grey(c(1:10)/10))
+## map of the relocations
+plot(puechabonsp$relocs, add=TRUE,
+     col=as.data.frame(puechabonsp$relocs)[,1])
+
+```
+
+#**3 The Minimum Convex Polygon (MCP)**
+#*3.1 The method*
+#The MCP is probably the most widely used estimation method. This method consists in the calculation of the smallest convex polygon enclosing all the relocations of the animal. This polygon is considered to be the home range of the animal. Because the home range has been defned as the area traversed by the animal during its normal activities of foraging, mating and caring for young (Burt, 1943), a common operation consists to frst remove a small percentage of 8 the relocations farthest from the centroid of the cloud of relocations before the estimation. Indeed, the animal may sometimes make occasionnal large moves to unusual places outside its home range, and this results into outliers that cannot be considered as normal activities.
+
+# *3.2 The function mcp and interaction with the package sp*
+# The function mcp allows the MCP estimation. For example, using the puechabonsp dataset, we estimate here the MCP of the monitored wild boars (after the removal of 5% of extreme points). Remember that the frst column of puechabonsp$relocs is the identity of the animals:
+
+```{r}
+
+data(puechabonsp)
+cp <- mcp(puechabonsp$relocs[,1], percent=95)
+
+# The results are stored in an object of class SpatialPolygonsDataFrame:
+class(cp)
+
+# Therefore the functions available in the package sp and related packages (sf,etc.) are available to deal with these objects. For example, the function plot:
+plot(cp)
+plot(puechabonsp$relocs, add=TRUE)
+```
+
+```{r, eval=FALSE}
+#Similarly, the function st_write from the package sf can be used to export the object cp to a shape file (after conversion to the class sf), so that it can be read into a GIS:
+library(sf)
+st_write(st_as_sf(cp), "homerange.shp")
+
+#The resulting shape files can be read in any GIS.
+
+```
+
+# *3.3 Overlay operations*
+# The function over of the package sp allows to combine points (including grid of pixels) and polygons for points-in-polygon operations (see the help page of this function). For example, the element map of the dataset puechabonsp is a map of the study area according to four variables:
+```{r}
+
+head(as.data.frame(puechabonsp$map))
+
+# This object is of the class SpatialPixelsDataFrame. We may identify the pixels of this map enclosed in each home range using the function over from the package sp. For example, to identify the pixels enclosed in the home range of the second animal:
+enc <- over(puechabonsp$map, as(cp[2,],"SpatialPolygons"), fn=function(x) return(1))
+enc <- as.data.frame(enc)
+head(enc)
+
+# The result is a data.frame with one variable containing the value 1 if a pixel of the map is included in a home range, and NA if the pixel is outside the homerange. We may transform this vector into a SpatialPixelsDataFrame, using the functions of the package sp:
+coordinates(enc) <- coordinates(puechabonsp$map)
+gridded(enc) <- TRUE
+
+# The result is shown below, in black, on an elevation map:
+image(puechabonsp$map)
+image(enc, add=TRUE, col="black", useRasterImage=FALSE)
+
+# However, because the rasterization of home ranges is a common operation, I included a function hr.rast to make this operation more straightforward:
+cprast <- hr.rast(cp, puechabonsp$map)
+
+# The resulting object is a SpatialPixelsDataFrame with one column per animal:
+par(mar=c(0,0,0,0))
+par(mfrow=c(2,2))
+for (i in 1:4) {
+  image(cprast[,i], useRasterImage=FALSE)
+  box()
+}
+
+
+```
+
+# *3.4 Computation of the home-range size*
+#The home range size is automatically computed by the function mcp. Thus, coercing the object returned by the function to the class data.frame gives access to the home range size:
+
+```{r}
+
+as.data.frame(cp)
+
+# The area is here expressed in hectares (the original units in the object puechabonsp$relocs were expressed in metres). The units of the results and of the original data are controlled by the arguments unin and unout of the function mcp (see the help page of the function mcp). We did not change the units in our example estimation, as the default was a suitable choice.
+
+#In this example, we have chosen to exclude 5% of the mst extreme relocations, but we could have made another choice. We may compute the home-range size for various choices of the number of extreme relocations to be excluded, using the function mcp.area:
+
+hrs <- mcp.area(puechabonsp$relocs[,1], percent=seq(50, 100, by = 5))
+
+# Note that the results of the function mcp.area are stored in a data frame of class "hrsize" and can be used for further analysis:
+
+hrs
+```
+# Here, except for Calou, the choice to exclude 5% of the relocations seems a sensible one. In the case of Calou, it is disputable to remove 20% of the relocations to achieve an asymptote in the home range size decrease. 20% of the time spent in an area is no longer an exceptionnal activity... and this area could be considered as part of the home range. Under these conditions, the choice to compute the MCP with 95% of the relocations for all animals seems a sensible one.
+
+
+# **4.2 The function kernelUD: estimating the utilization distribution**
+# The function kernelUD of the package adehabitatHR implements the method described above to estimate the UD. The UD is estimated in each pixel of a grid superposed to the relocations. I describe in the next sections how the grid parameters can be controlled in the estimation. Similarly to all the functions allowing the estimation of the home range, the functions may take as argument either a SpatialPoints object (estimation of the UD of one animal) or a SpatialPointsDataFrame object with one column corresponding to the identity of the animal (estimation of the UD of several animals). The argument h controls the value of the smoothing parameter. Thus, if h = "href", the reference bandwidth is used in the estimation. If h = "LSCV", the LSCV bandwidth is used in the estimation. Alternatively, it is possible to pass a numeric value for the smoothing parameter.
+
+
+# I give below a short example of the use of kernelUD, using the puechabonsp dataset. Remember that the rst column of the component relocs of this dataset contains the identity of the animals:
+
+```{r}
+
+data(puechabonsp)
+kud <- kernelUD(puechabonsp$relocs[,1], h="href")
+kud
+
+ image(kud)
+ 
+ kud[[1]]@h
+
+```
+
+# **4.3 The Least Square Cross Validation**
+# Alternatively, we could have set the argument h equal to "LSCV". The LSCV algorithm searches for the optimum value of h in the interval specified by the parameter hlim. As an example, estimate the UD with a h parameter chosen with the LSCV algorithm for the puechabonsp dataset:
+
+```{r}
+
+# The resulting UD fits the data more closely than the use of "href". However, note that the cross-validation criterion cannot be minimized in some cases. According to Seaman and Powell (1998) "This is a dificult problem that has not been worked out by statistical theoreticians, so no definitive response is available at this time". Therefore, it is essential to look at the results of the LSCVvminimization using the function plotLSCV:
+kudl <- kernelUD(puechabonsp$relocs[,1], h="LSCV")
+image(kudl)
+
+plotLSCV(kudl)
+
+# Here, the minimization has been achieved in the specied interval. When the algorithm does not converge toward a solution, the estimate should not be used in further analysis.
+
+```
+
+# **Controling the Grid**
+# *4.4.1 Passing a numeric value*
+# When a numeric value is passed to the parameter grid, the function kernelUD automatically computes the grid for the estimation.
+```{r}
+
+## The relocations of "Brock"
+locs <- puechabonsp$relocs
+firs <- locs[as.data.frame(locs)[,1]=="Brock",]
+## Graphical parameters
+par(mar=c(0,0,2,0))
+par(mfrow=c(2,2))
+## Estimation of the UD with grid=20 and extent=0.2
+image(kernelUD(firs, grid=20, extent=0.2))
+title(main="grid=20, extent=0.2")
+## Estimation of the UD with grid=20 and extent=0.2
+image(kernelUD(firs, grid=80, extent=0.2))
+title(main="grid=80, extent=0.2")
+## Estimation of the UD with grid=20 and extent=0.2
+image(kernelUD(firs, grid=20, extent=3))
+title(main="grid=20, extent=3")
+## Estimation of the UD with grid=20 and extent=0.2
+image(kernelUD(firs, grid=80, extent=3))
+title(main="grid=80, extent=3")
+
+# Note that the parameter same4all is an additional parameter allowing the control of the grid. If it is equal to TRUE, the same grid is used for all animals, thus for example:
+kus <- kernelUD(puechabonsp$relocs[,1], same4all=TRUE)
+image(kus)
+
+# Because all the UD are estimated on the same grid, it is possible to coerce the resulting object as a SpatialPixelsDataFrame:
+ii <- estUDm2spixdf(kus)
+class(ii)
+
+# This object can then be handed with the functions of the package sp.
+
+```
+
+# **4.4.2 Passing a SpatialPixelsDataFrame**
+#It is sometimes useful to estimate the UD in each pixel of a raster map already available. This can be useful in habitat selection studies, when the value of the UD is to be later related to the value of environmental variables. In such cases, it is possible to pass a raster map to the parameter grid of the function. For example, the dataset puechabonsp contains an object of class SpatialPixelsDataFrame storing the environmental information for this variable. This map can be passed to the parameter grid:
+
+```{r}
+
+kudm <- kernelUD(puechabonsp$relocs[,1], grid=puechabonsp$map)
+
+# And as in the previous section, the object can be coerced into a SpatialPixelsDataFrame using the function estUDm2spixdf. Note also that it is possible to pass a list of SpatialPixelsDataFrame (with one element per animal) to the parameter grid (see the help page of the function kernelUD).
+
+```
+
+# **4.5 Estimating the home range from the UD**
+# The UD gives the probability density to relocate the animal at a given place. The home range deduced from the UD as the minimum area on which the probability to relocate the animal is equal to a specied value. For example, the 95% home range corresponds to the smallest area on which the probability to relocate the animal is equal to 0.95. The functions getvolumeUD and getverticeshr provide utilities for home range estimation.
+
+# *4.5.1 Home ranges in vector mode*
+# The most useful function is the function getverticeshr. For example, to deduce the 90% home range from the UD estimated using the LSCV algorithm:
+
+```{r}
+
+homerange <- getverticeshr(kudl)
+class(homerange)
+
+# The resulting object is of the class SpatialPolygonsDataFrame. Therefore, as for the MCP (see previous section), the functions of the package sp and sf are available to deal with this object, or to export it toward a GIS (see section 3.2 for examples). Therefore, to display the home range:
+plot(homerange, col=1:4)
+
+```
+
+# *4.5.2 Home ranges in raster mode*
+# However, the function getverticeshr returns an object of class SpatialPolygonsDataFrame, i.e. an object in mode vector. The function getvolumeUD may also be useful to estimate the home range in raster mode, from the UD. Actually, this function modifies the UD component of the object passed as argument, so that the value of a pixel is equal to the percentage of the smallest home range containing this pixel:
+```{r}
+vud <- getvolumeUD(kudl)
+vud
+
+# To make clear the differences between the output of kernelUD and getvolumeUD look at the values on the following contourplot:
+
+## Set up graphical parameters
+par(mfrow=c(2,1))
+par(mar=c(0,0,2,0))
+## The output of kernelUD for the first animal
+image(kudl[[1]])
+title("Output of kernelUD")
+## Convert into a suitable data structure for
+## the use of contour
+xyz <- as.image.SpatialGridDataFrame(kudl[[1]])
+contour(xyz, add=TRUE)
+## and similarly for the output of getvolumeUD
+par(mar=c(0,0,2,0))
+image(vud[[1]])
+title("Output of getvolumeUD")
+xyzv <- as.image.SpatialGridDataFrame(vud[[1]])
+contour(xyzv, add=TRUE)
+
+# Whereas the output of kernelUD is the raw UD, the output of getvolumeUD can be used to compute the home range (the labels of the contour lines correspond to the home ranges computed with various probability levels). For example, to get the rasterized 95% home range of the rst animal:
+
+## store the volume under the UD (as computed by getvolumeUD)
+## of the first animal in fud
+fud <- vud[[1]]
+## store the value of the volume under UD in a vector hr95
+hr95 <- as.data.frame(fud)[,1]
+## if hr95 is <= 95 then the pixel belongs to the home range
+## (takes the value 1, 0 otherwise)
+hr95 <- as.numeric(hr95 <= 95)
+## Converts into a data frame
+hr95 <- data.frame(hr95)
+## Converts to a SpatialPixelsDataFrame
+coordinates(hr95) <- coordinates(vud[[1]])
+gridded(hr95) <- TRUE
+## display the results
+image(hr95)
+```
+
+# **4.7 Taking into account the presence of physical boundary over the study area**
+# In a recent paper, Benhamou and Cornelis (2010) proposed an interesting approach to take into account the presence of physical boundaries on the study area. They proposed to extend to 2 dimensions a method developed for one dimension by Silverman 1986. 
+
+``` {r}
+
+# Now, let us consider the case of the wild boar monitored in Puechabon. Consider the map of the elevation on the study area:
+image(puechabonsp$map)
+
+# This area is traversed by the Herault gorges. As can be seen on this figure, the slopes of the gorges are very steep, and it is nearly impossible for the wild boars monitored to cross the river (although it is possible in other places). Therefore, the gorges are a boundary that cannot be crossed by the animal. Using the function locator(), we have defined the following boundary:
+
+# Define the boundary using the structure function
+bound <- structure(
+  list(
+    x = c(
+      701751.385381925, 701019.24105475, 700739.303517889,
+      700071.760160759, 699522.651915378, 698887.40904327,
+      698510.570051342, 698262.932999504, 697843.026694212,
+      698058.363261028
+    ),
+    y = c(
+      3161824.03387414, 3161824.03387414, 3161446.96718494,
+      3161770.16720425, 3161479.28718687, 3161231.50050539,
+      3161037.5804938, 3160294.22044937, 3159389.26039528,
+      3157482.3802813
+    )
+  ),
+  .Names = c("x", "y")
+)
+
+# Plot the map
+image(puechabonsp$map)
+
+# Add the boundary lines
+lines(bound, lwd = 2)
+
+
+# We now convert this boundary as a SpatialLines object:
+bound <- do.call("cbind",bound)
+Slo1 <- Line(bound)
+Sli1 <- Lines(list(Slo1), ID="frontier1")
+barrier <- SpatialLines(list(Sli1))
+
+# We can now set the parameter boundary of the function kernelUD, which indicates that we want to use this approach:
+kud <- kernelUD(puechabonsp$relocs[,1], h=100, grid=100, boundary=barrier)
+image(kud)
+
+```
+
+# **5 Taking into account the time dependence between relocation**
+# *5.1.2 Example*
+# The Brownian bridge kernel method is implemented in the function kernelbb of the package. This function takes as argument an object of class ltraj. This class has been developed in the brother package adehabitatLT to store animals trajectory sampled using GPS, radio-tracking, Argos data, etc. The interested reader should read the help page of the function as.ltraj as well as the vignette of the package adehabitatLT. First consider as an example the night monitoring (every 10 minutes) of one wild boar:
+
+```{r}
+
+data(puechcirc)
+x <- puechcirc[1]
+x
+
+# Have a look at the trajectory of the animal:
+plot(x)
+
+
+# A study has shown that the mean standard deviation of the relocations (relocations as a sample of the actual position of the animal) is equal to 58 meters on these data (Maillard, 1996, p. 63). Therefore, we set sig2 = 58 metres. Then we use the function liker to find the maximum likelihood estimation of the parameter sig1. We search the optimum value in the range [10, 100]:
+lik <- liker(x, sig2 = 58, rangesig1 = c(10, 100))
+
+# We expected a too large standard deviation... Let us try again, and search in the interval [1, 10]:
+lik2 <- liker(x, sig2 = 58, rangesig1 = c(1, 10))
+
+# Actually, the optimum value is 6.23:
+lik2
+
+# We can now estimate the kernel Brownian bridge home range with the parameters sig1=6.23 and sig2=58:
+tata <- kernelbb(x, sig1 = 6.23, sig2 = 58, grid = 50)
+tata
+
+# The result is an object of class estUD, and can be managed as such (see section 4.2). For example to see the utilization distribution and the 95% home range:
+image(tata)
+plot(getverticeshr(tata, 95), add=TRUE, lwd=2)
+```
+
+# **5.2 The biased random bridge kernel method**
+# *5.2.2 Implementation*
+# The BRB approach is implemented in the function BRB of adehabitatHR. We first load the dataset buffalo used by Benhamou (2011) to illustrate this approach:
+
+```{r}
+
+ data(buffalo)
+tr <- buffalo$traj
+tr
+
+# Note that this object has an infolocs component describing the proportion of time between relocation i and relocation i + 1 during which the animal was active. We show the trajectory of the animal below:
+plot(tr, spixdf=buffalo$habitat)
+
+# The first step of the analysis consists in the estimation of the diusion coef-ficient D. We want to estimate one diusion parameter for each habitat type. As Benhamou (2011), we set Tmax = 180 minutes and Lmin = 50 metres (the smallest distance below which we consider that the animal is not moving). Because it is more sensible to consider the time of activity in the implementation of the method, we dene the argument activity of the function as the name of the variable in the infolocs component storing this information:
+vv <- BRB.D(tr, Tmax=180*60, Lmin=50, habitat=buffalo$habitat, activity="act")
+vv
+
+# The function BRB.D implements the estimation of the diusion coecient described in Benhamou (2011). Note that a maximum likelihood approach, similar to the approach used by Horne et al. (2007) is also available in the function BRB.likD. The values of the diusion parameters are given in m2.s−1. Note that the number of steps in habitat 2 was to small to allow the calculation of a diusion parameter for this habitat type. We can then use the functionvBRB to estimate the UD from these relocations. The parameter tau controls thevtime lag between interpolated relocations. Similarly to Benhamou (2011), we set τ = 5 min, and hmin = 100 metres:
+ud <- BRB(tr, D = vv, Tmax = 180*60, tau = 300, Lmin = 50, hmin=100, habitat = buffalo$habitat, activity = "act", grid = 100, b=0)
+ud
+
+# The missing dispersion parameter for habitat 2 was replaced in the estimation by the global dispersion parameter. As for all kernel methods, this function returns an object of class estUD or estUDm, depending on the number of animals in the object of class ltraj passed as argument. We show the resulting UD:
+image(ud)
+
+```
+
+# *5.2.3 Decomposing the use of space into intensity and recursion*
+# Benhamou and Riotte-Lambert (2012) noted that, as a whole, the time spent at a given location by the animal can be seen as the product between the mean residence time per visit times the number of visits of the location. It may be interesting, biologically, to distinguish these two components, for example to identify the places that the animal often uses and the places that are used only once, but for a long time. The identication of such components can be useful to test hypotheses concerning the habitat selection by the animal. Thus, these authors indicate: Some areas, in particular those that are more protable, tend to be exploited more intensively during a given visit, involving a longer residence time. An initially protable area may be avoided for a while once depleted if the resources it encompasses renew very slowly, but should tend to be revisited quite often otherwise, or if it is depleted only partially at each visit. These authors therefore proposed a modication of the BRB approach to allow the estimation of an intensity distribution (ID) reecting this average residence time and of a recursion distribution (RD) reecting the number of visits. This modication relies on the calculation of (i) the residence time associated to each relocation interpolated using the procedure described in the previous section (roughly, the residence time calculated on a given relocation corresponds to the time spent by the animal in a circle of radius r centered on this relocation, see the vignette of the package adehabitatLT), and (ii) the number of visits associated to each relocation (i.e. the number of times that the animal performed in a circle of radius r centered on the relocation).
+
+```{r}
+
+# We estimate the UD, ID and RD with these parameters below:
+# We estimate the UD, ID, and RD with these parameters below:
+id <- BRB(buffalo$traj, D = 7.36, Tmax = 3*3600, Lmin = 50, type = "ID", hmin=100, radius = 300, maxt = 2*3600, tau = 300, grid = 100, extent=0.1)
+rd <- BRB(buffalo$traj, D = 7.36, Tmax = 3*3600, Lmin = 50, type = "RD", hmin=100, radius = 300, maxt = 2*3600, tau = 300, grid = 100, extent=0.1)
+ud <- BRB(buffalo$traj, D = 7.36, Tmax = 3*3600, Lmin = 50, type = "UD", hmin=100, radius = 300, maxt = 2*3600, tau = 300, grid = 100, extent=0.1)
+
+par(mfrow = c(2,2), mar=c(0,0,2,0))
+vid <- getvolumeUD(id)
+image(vid)
+contour(vid, add=TRUE, nlevels=1, levels=30, lwd=1, drawlabels=FALSE)
+title("ID")
+
+vrd <- getvolumeUD(rd)
+image(vrd)
+contour(vrd, add=TRUE, nlevels=1, levels=30, lwd=1, drawlabels=FALSE)
+title("RD")
+
+vud <- getvolumeUD(ud)
+image(vud)
+contour(vud, add=TRUE, nlevels=1, levels=95, lwd=1, drawlabels=FALSE)
+title("UD")
+
+```
+
+# **5.3 The product kernel algorithm**
+# *5.3.1 Description*
+# Until now, we have only considered utilization distribution in space. However,Horne et al. (2007) noted that it could also be useful to explore utilization distributions in space and time. That is, to smooth the animals distribution not only in space, but also in time.
+
+# *5.3.2 Application*
+```{r}
+
+# We now illustrate the product kernel algorithm on an example. We load the bear dataset. This dataset describes the trajectory of a brown bear monitored using GPS (from the package adehabitatLT):
+data(bear)
+bear
+
+# The data are stored as an object of class ltraj (see section 5.1.2). Let us compute the UD of this bear for the date 2004-05-01. After a visual exploration, we noted that a smoothing parameter of 1000 meters for X and Y coordinates, and of 72 hours for the time returned interesting results. We can compute the UD with:
+uu <- kernelkc(bear, h = c(1000, 1000, 72*3600), tcalc = as.POSIXct("2004-05-01"), grid = 50)
+uu
+
+# Plot the bear trajectory
+plot(bear, spixdf=uu)
+
+# To compute the 95% home-range, there is a subtlety. Note that the UD integral over the whole plane is not equal to 1:
+sum(slot(uu,"data")[,1])*(gridparameters(uu)[1,2]^2)
+
+# This is because the UD is defined in space and time. That is, the integral over the X, Y and time direction is equal to 1, and not the integral over the X, Y direction at a given time t. Therefore, the 95% home range at a given time t relies on a "restandardization":
+
+# This is done by setting to TRUE the argument standardize of the functions getvolumeUD or getverticeshr. Thus, to calculate the home range of the bear at this date, type:
+ver <- getverticeshr(uu, percent=95, standardize=TRUE)
+image(uu)
+plot(ver, add=TRUE)
+
+# Note that it is possible to estimate the UD at a succession of ti close in time, then to draw the images corresponding and save them in a file, and finally to combine these images into a movie. The movie can then be explored to identify patterns. For example, the following code can be used to generate image files (because it is very long, we do not execute it in this vignette):
+
+## compute the sequence of dates at which the UD is to be estimated
+vv <- seq(min(bear[[1]]$date), max(bear[[1]]$date), length=50)
+head(vv)
+## estimates the UD at each time point
+re <- lapply(1:length(vv), function(i) {
+  
+  ## estimate the UD. We choose a smoothing parameter of
+  ## 1000 meters for X and Y coordinates, and of 72 hours
+  ## for the time (after a visual exploration)
+  uu <- kernelkc(bear, h = c(1000,1000,72*3600),
+                 tcalc= vv[i], grid=50)
+  
+  ## To save the result in a file, type
+  jpeg(paste("UD", i, ".jpg", sep=""))
+  
+  ## draw the image
+  image(uu, col=grey(seq(1,0,length=10)))
+  title(main=vv[i])
+  
+  ## highlight the 95 percent home range
+  ## we set standardize = TRUE because we want to estimate
+  ## the home range in space from a UD estimated in space and
+  ## time
+  plot(getverticeshr(uu, 95, standardize=TRUE), lwd=2,
+       border="red", add=TRUE)
+  
+  ## close the device
+  dev.off()
+})
+
+```
+
+# *5.3.3 Application with time considered as a circular variable*
+# Now, consider the time as a circular variable. We consider a time cycle of 24 hour. We will estimate the UD at 03h00. We have to dene the beginning of the cycle (argument t0 of the function kernelkc). We consider that the time cycle begins at midnight (there is no particular reason, it is just to illustrate the function). We have to set, as the argument t0, any object of class POSIXct corresponding to a date at this hour, for example the 12/25/2012 at 00H00:
+
+```{r}
+t0 <- as.POSIXct("2012-12-25 00:00")
+
+# We define h = 0.2 for the time dimension (remember that h should be comprised between 0 and 1). We can have a look at the amount of weight given to the neighbouring time points of the point 3h00:
+exwc(0.2)
+
+# The function exwc draws a graph of the wrapped Cauchy distribution for the chosen h parameter (for circular time), so that it is possible to make one's mind concerning the weight that can be given to the neighbouring points of a given time point. Now use the function kernelkc to estimate the UD:
+uu <- kernelkc(bear, h=c(1000,1000,0.2), cycle=24*3600,
+  tcalc=3*3600, t0=t0, circular=TRUE)
+image(uu)
+
+```
+
+# **6 Convex hulls methods**
+# Several methods relying on the calculation of multiple convex hulls have been developed to estimate the home range from relocation data. The package adehabitatHR implements three such methods. I describe these three methods in this section.
+
+# **6.1 The single linkage algorithm**
+# *6.1.1 The method*
+# Kenward et al. (2001) proposed a modication of the single-linkage cluster analysis for the estimation of the home range. Whereas this method does not rely on a probabilistic denition of the home range (contrary to the kernel method), it can still be useful to identify the structure of the home range.
+
+# *6.1.2 The function clusthr*
+```{r}
+# Take as example the puechabonsp dataset:
+uu <- clusthr(puechabonsp$relocs[,1])
+
+# The class MCHu is returned by all the home range estimation methods based on clustering methods (LoCoH and single linkage). The object uu is basically a list of SpatialPolygonsDataFrame objects (one per animal). We can have a display of the home ranges by typing:
+ plot(uu)
+ 
+# The information stored in each SpatialPolygonsDataFrame object is the following (for example, for the third animal):
+as.data.frame(uu[[3]])
+
+# From this data frame, it is possible to extract a home range corresponding to a particular percentage of relocations enclosed in the home range. For example, the smallest home range enclosing 90% of the relocations corresponds to the row 26 of this data frame:
+plot(uu[[3]][26,])
+
+```
+
+# *6.1.3 Rasterizing an object of class MCHu*
+```{r}
+
+# It is possible to rasterize the estimated home ranges using the function MCHu.rast. For example, using the map component of the puechabonsp dataset:
+uur <- MCHu.rast(uu, puechabonsp$map, percent=90)
+image(uur, 3)
+class(uu)
+
+```
+
+# *6.1.4 Computing the home-range size*
+
+```{r}
+# We already noticed that the object of class MCHu returned by the function clusthr contains the area of each home range. For example, for the rst animal:
+head(as.data.frame(uu[[1]]))
+
+# and as usual, the units of these areas are controlled by the parameters unin and unout of the function clusthr. I also included a function MCHu2hrsize, which generates an object of class hrsize, and makes easier the exploration of the relationship between the home range size and the percentage of relocations included in the home range:
+ii <- MCHu2hrsize(uu, percent=seq(50, 100, by=5))
+
+```
+# Here, the choice of 90% seems a good choice for the estimation, as the areapercentage relationship seems to reach a rough asymptote (no steep fall in the decrease below this value).
+
+# **6.2 The LoCoH methods**
+# The LoCoH (Local Convex Hulls) family of methods has been proposed by Getz et al. (2007) for locating Utilization Distributions from relocation data. Three possible algorithms can be used: Fixed k LoCoH, Fixed r LoCoH, and Adaptive LoCoH. The three algorithms are implemented in adehabitatHR. All the algorithms work by constructing a small convex hull for each relocation and its neighbours, and then incrementally merging the hulls together from smallest to largest into isopleths. The 10% isopleth contains 10% of the points and represents a higher utilization than the 100% isopleth that contains all the points (as or the single linkage method).
+
+# **6.3 Example with the Fixed k LoCoH method**
+# We use the fixed k LoCoH method to estimate the home range of the wild boars monitored at Puechabon, for example with k = 5:
+
+```{r}
+res <- LoCoH.k(puechabonsp$relocs[,1], 10)
+
+# The object returned by the function is of the class MCHu, as the objects returned by the function clusthr (see previous section). Consequently, all the functions developed for this class of objects can be used (including rasterization with MCHu.rast, computation of home-range size with MCHu2hrsize, etc.). A visual display of the home ranges can be obtained with:
+plot(res)
+
+# Note that the relationship between the home range size and the number of chosen neighbours can be investigated thanks to the function LoCoH.k.area:
+LoCoH.k.area(puechabonsp$relocs[,1], krange=seq(4, 15, length=5),
+percent=100)
+
+# Just copy and paste the above code (it is not executed in this report). An asymptote seems to be reached at about 10 neighbours, which justies the choice of 10 neighbours for an home range estimated with 100% of the relocations (a more stable home range size).
+
+```
+
+# **6.4 The characteristic hull method**
+# Downs and Horner (2009) developed an interesting method for the home range
+estimation. This method relies on the calculation of the Delaunay triangulation of the set of relocations. Then, the triangles are ordered according to their area (and not their perimeter). The smallest triangles correspond to the areas the most intensively used by the animals. It is then possible to derive the home range estimated for a given percentage level. For example, consider the puechabonsp dataset.
+
+```{r}
+
+res <- CharHull(puechabonsp$relocs[,1])
+class(res)
+
+# The object returned by the function is also of the class MCHu, as the objects returned by the functions clusthr and LoCoH.* (see previous sections). Consequently, all the functions developed for this class of objects can be used (including rasterization with MCHu.rast, computation of home-range size with MCHu2hrsize, extraction of the home-range contour with getverticeshr etc.). A visual display of the home ranges can be obtained with:
+plot(res)
+```

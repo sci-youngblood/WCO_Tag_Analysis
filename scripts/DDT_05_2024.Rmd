@@ -1,0 +1,1284 @@
+---
+title: "NOAA DDT DATA"
+author: "MORGAN YOUNGBLOOD"
+date: "05/21/2024"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+#_______________
+```{r setup, include=FALSE}
+
+# Set the root directory for notebook chunks
+knitr::opts_knit$set(root.dir = "Documents/Personal/NOAA/Hollings Project/Analysis")
+
+# Set the working directory for the session
+setwd("Documents/Personal/NOAA/Hollings Project/Analysis")
+
+# Verify the working directory
+getwd()
+```
+
+# Load packages
+```{r packages, warning=FALSE, message=FALSE}
+#install.packages("fuzzyjoin")
+
+library(readr)
+library(gganimate)
+library(lubridate)
+library(adehabitatHR)
+library(adehabitatHS)
+library(adehabitatLT)
+library(adehabitatMA)
+library(deldir)
+library(dplyr)
+library(sp)
+library(ggplot2)
+library(sf)
+library(ggmap)
+library(ggplot2)
+library(stats)
+library(viridis)
+library(geosphere)
+library(zoo)
+library(gifski)
+library(fuzzyjoin)
+
+```
+
+# Import Data
+```{r, warning=FALSE}
+
+library(readr)
+
+WCO <- read_csv("hollings_detection-data_cinms-wco_20231024_01.csv")
+head(WCO)
+str(WCO)
+
+```
+#_______________
+# Data Cleaning and Organizing
+
+## Setup time data 
+```{r, warning=FALSE}
+
+# Convert Date and Time (UTC) to local timezone
+WCO$Local_Time <- as.POSIXct(WCO$`Date and Time (UTC)`, tz = "America/Los_Angeles")
+
+# Extract date component
+WCO$Date <- as.Date(WCO$Local_Time)
+
+# Extract month and year from Date
+WCO$Month <- format(WCO$Date, "%m")
+WCO$Year <- format(WCO$Date, "%Y")
+WCO$Hour <- format(WCO$Local_Time, "%H")
+
+# Define seasons based on the month
+WCO$Season <- with(WCO, ifelse(Month %in% c("03", "04", "05"), "Spring",
+                        ifelse(Month %in% c("06", "07", "08"), "Summer",
+                        ifelse(Month %in% c("09", "10", "11"), "Fall",
+                        "Winter"))))
+
+head(WCO)
+
+```
+
+## Clean Data
+```{r, warning=FALSE}
+
+# Remove columns with all NA values
+WCO <- WCO %>% select_if(~ !all(is.na(.)))
+
+```
+
+## Inspect Station Data and Group Associated Islands
+```{r, warning=FALSE}
+
+# Define the order of islands and stations in descending order
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland")
+station_order <- c("WCO_Cuyler", "WCO_Tyler Bight", "WCO_Carrington Point", "WCO_Johnson's Lee",
+                   "WCO_Hazards_Profile", "WCO_Trailers", "WCO_MorsePoint", "WCO_Valley",
+                   "WCO_Smugglers", "WCO_Scorpion", "WCO_Pelican", "WCO_Winfield Scott",
+                   "WCO_Anacapa South", "WCO_Mohawk LTER", "WCO_Carpinteria")
+
+# Inspect Station Data and Group Associated Islands
+# Get unique stations
+unique_stations <- WCO %>%
+  select(`Station Name`, Latitude, Longitude) %>%
+  distinct()
+
+# Display the unique stations and their corresponding lat/long
+print(unique_stations)
+
+# Count the number of unique stations and unique lat/long combinations
+num_unique_stations <- n_distinct(WCO$`Station Name`)
+num_unique_latlong <- n_distinct(paste(WCO$Latitude, WCO$Longitude))
+
+cat("Number of unique stations: ", num_unique_stations, "\n")
+cat("Number of unique latitude/longitude combinations: ", num_unique_latlong, "\n")
+
+# Create a mapping of stations to islands
+station_to_island <- data.frame(
+  `Station Name` = c("WCO_Cuyler", "WCO_Tyler Bight",
+                     "WCO_Carrington Point", "WCO_Johnson's Lee",
+                     "WCO_Hazards_Profile", "WCO_Trailers",
+                     "WCO_MorsePoint", "WCO_Valley", "WCO_Smugglers",
+                     "WCO_Scorpion", "WCO_Pelican",
+                     "WCO_Winfield Scott", "WCO_Anacapa South",
+                     "WCO_Mohawk LTER", "WCO_Carpinteria"),
+  Island = c("San Miguel", "San Miguel",
+             "Santa Rosa", "Santa Rosa",
+             "Santa Cruz", "Santa Cruz",
+             "Santa Cruz", "Santa Cruz", "Santa Cruz",
+             "Santa Cruz", "Santa Cruz",
+             "Anacapa", "Anacapa",
+             "Mainland", "Mainland")
+)
+
+# Ensure column names match exactly
+colnames(station_to_island) <- c("Station Name", "Island")
+
+# Perform the join to add island information
+WCO <- WCO %>%
+  left_join(station_to_island, by = "Station Name")
+
+# Check if Island column exists after join
+print(colnames(WCO))
+print(head(WCO))
+
+# Add the island information to the main dataset
+if ("Island" %in% colnames(WCO)) {
+  WCO <- WCO %>%
+    mutate(Island = ifelse(is.na(Island), "Santa Barbara", Island))
+} else {
+  stop("The 'Island' column was not created in the join.")
+}
+
+# Convert Island and Station Name to factors with specified order
+WCO <- WCO %>%
+  mutate(Island = factor(Island, levels = island_order),
+         `Station Name` = factor(`Station Name`, levels = station_order))
+
+# Display the structure and first few rows of the updated dataset
+str(WCO)
+head(WCO)
+
+```
+
+## More cleaning and Remove Santa Barbara
+```{r, warning=FALSE}
+
+# Filter for detections > 1
+WCO <- WCO %>%
+  group_by(`Station Name`, Island, Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# Remove the specified columns
+WCO <- WCO %>%
+  select(-c(`Transmitter Name`, `Transmitter Serial`, `Sensor Value`, `Sensor Unit`))
+
+# Remove data associated with Santa Barbara Island
+WCO <- WCO %>%
+  filter(Island != "Santa Barbara")
+
+# Display the structure and first few rows of the cleaned dataset
+str(WCO)
+head(WCO)
+
+```
+
+## Make tag ID lists
+```{r}
+
+LoweLabTagInfo <- readRDS("LoweLabTagInfo.rds")
+
+# Perform an inner join to find matching transmitters
+matching_Lowe_transmitters <- WCO %>%
+  inner_join(LoweLabTagInfo, by = "Transmitter")
+
+# Count the number of matching transmitters
+n_matching_Lowe_transmitters <- nrow(matching_Lowe_transmitters)
+print(n_matching_Lowe_transmitters)
+
+# Count the number of unique matching transmitters
+unique_matching_Lowe_transmitters <- matching_Lowe_transmitters %>%
+  select(Transmitter) %>%
+  distinct() %>%
+  nrow()
+
+print(unique_matching_Lowe_transmitters)
+
+Tag_ID_List <- read_csv("Tag_ID_List.csv")
+#View(Tag_ID_List)
+
+# Merge the datasets on the Transmitter column
+Tag_ID_6_1 <- Tag_ID_List %>%
+  left_join(LoweLabTagInfo, by = "Transmitter")
+
+# Combine SciName.x and SciName.y into a single SciName column
+Tag_ID_6_1 <- Tag_ID_6_1 %>%
+  mutate(SciName = if_else(is.na(SciName.y), SciName.x, SciName.y)) %>%
+  select(-SciName.x, -SciName.y)
+
+# View the merged data
+str(Tag_ID_6_1)
+head(Tag_ID_6_1)
+
+# Export the merged dataset to a CSV file
+write_csv(Tag_ID_6_1, "Updated_Tag_ID_6_1.csv")
+
+# Filter the dataset for rows where SciName is NA
+NA_Tag_ID_6_1 <- Tag_ID_6_1 %>%
+  filter(is.na(SciName)) %>%
+  select(Transmitter, First_Detection, Last_Detection)
+
+# Export the filtered dataset to a .csv file
+write_csv(NA_Tag_ID_6_1, "NA_Tag_ID_6_1.csv")
+
+```
+
+## Merge IDs to WCO Data
+```{r}
+
+# Merge the Tag_ID_6_1 data into the WCO dataset based on the Transmitter column
+WCO <- WCO %>%
+  left_join(Tag_ID_6_1, by = "Transmitter")
+
+# Verify the structure of the merged dataset
+str(WCO)
+
+# Export the merged dataset to a CSV file
+write_csv(WCO, "WCO_with_Tag_ID_6_6_24.csv")
+
+```
+
+#_______________
+# Summary
+
+## Transmitter overview
+```{r}
+
+# Detections per Transmitter
+detections_per_transmitter <- WCO %>%
+  group_by(Transmitter) %>%
+  summarise(Detections = n())
+
+print(detections_per_transmitter)
+
+# Bar plot for Detections per Transmitter
+ggplot(detections_per_transmitter, aes(x = reorder(Transmitter, -Detections), y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Transmitter", x = "Transmitter", y = "Detections") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Detections per SciName
+detections_per_SciName <- WCO %>%
+  group_by(SciName) %>%
+  summarise(Detections = n())
+
+# Filter out rows where SciName is NA
+detections_per_SciName <- detections_per_SciName %>%
+  filter(!is.na(SciName))
+
+print(detections_per_SciName)
+
+# Bar plot for Detections per Transmitter
+ggplot(detections_per_SciName, aes(x = reorder(SciName, -Detections), y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Species", x = "Species", y = "Detections") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Unique transmitters per SciName
+unique_transmitters_per_SciName <- WCO %>%
+  filter(!is.na(SciName)) %>%  # Filter out rows where SciName is NA
+  group_by(SciName) %>%
+  summarise(Unique_Transmitters = n_distinct(Transmitter))
+
+print(unique_transmitters_per_SciName)
+
+# Bar plot for Unique Transmitters per SciName
+ggplot(unique_transmitters_per_SciName, aes(x = reorder(SciName, -Unique_Transmitters), y = Unique_Transmitters)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Unique Transmitters per Species", x = "Species", y = "Unique Transmitters") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Count unique transmitters for each species and sex
+count_sex_species <- WCO %>%
+  group_by(SciName, sex) %>%
+  summarise(Unique_Transmitters = n_distinct(Transmitter)) %>%
+  ungroup()
+
+# Filter out rows where sex is NA
+count_sex_species <- count_sex_species %>%
+  filter(!is.na(sex))
+
+# Print the result
+print(count_sex_species)
+
+# Create the bar plot for unique transmitters per species and sex
+ggplot(count_sex_species, aes(x = reorder(SciName, -Unique_Transmitters), y = Unique_Transmitters, fill = sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  labs(title = "Unique Transmitters per Species and Sex", x = "Species", y = "Number of Unique Transmitters") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Spatial Overview
+```{r, warning=FALSE}
+
+# Detections per Station
+detections_per_station <- WCO %>%
+  group_by(`Station Name`) %>%
+  summarise(Detections = n())
+
+# Detections per Island
+detections_per_island <- WCO %>%
+  group_by(Island) %>%
+  summarise(Detections = n())
+
+# Print summary statistics tables
+print(detections_per_station)
+print(detections_per_island)
+
+# Bar plot for Detections per Station
+ggplot(detections_per_station, aes(x = reorder(`Station Name`, -Detections), y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Station", x = "Station Name", y = "Detections") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Bar plot for Detections per Island
+ggplot(detections_per_island, aes(x = reorder(Island, -Detections), y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Island", x = "Island", y = "Detections")
+
+# Summarize detections per station
+detections_per_station <- WCO %>%
+  group_by(`Station Name`, Latitude, Longitude) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Read the shapefiles
+islands <- st_read("cinms_py2/cinms_py.shp")
+coast <- st_read("stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+
+# Create the scatter plot for detections per station with shapefile
+map_total_detections <- ggplot() +
+   geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the islands
+  geom_point(data = detections_per_station, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+  scale_color_viridis_c() +  # Color gradient
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Detections per Station", x = "Longitude", y = "Latitude", color = "Detections", size = "Detections")
+
+print(map_total_detections)
+
+# Save the plot as an image
+ggsave("total_detections_per_station_map.png", plot = map_total_detections, width = 10, height = 8, dpi = 300, units = "in")
+
+```
+
+### Transmitters per Location
+```{r}
+
+# Summarize number of unique transmitters detected per station
+transmitters_per_station <- WCO %>%
+  group_by(`Station Name`, Latitude, Longitude) %>%
+  summarise(Transmitters = n_distinct(Transmitter)) %>%
+  ungroup()
+
+# Create the bar plot for transmitters detected per station
+ggplot(transmitters_per_station, aes(x = reorder(`Station Name`, -Transmitters), y = Transmitters)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  theme_minimal() +
+  labs(title = "Unique Transmitters Detected per Station",
+       x = "Station Name",
+       y = "Number of Transmitters") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Summarize number of unique transmitters detected per island
+transmitters_per_island <- WCO %>%
+  group_by(Island) %>%
+  summarise(Transmitters = n_distinct(Transmitter)) %>%
+  ungroup()
+
+# Create the bar plot for transmitters detected per island
+ggplot(transmitters_per_island, aes(x = reorder(Island, -Transmitters), y = Transmitters)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  theme_minimal() +
+  labs(title = "Unique Transmitters Detected per Island",
+       x = "Island",
+       y = "Number of Transmitters") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Average Detections Per Transmitter at each Location
+```{r, warning=FALSE}
+
+# Calculate the number of detections per transmitter at each station
+detections_per_individual <- WCO %>%
+  group_by(`Station Name`, Transmitter) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Calculate average detections per individual, standard error, and sample size for each station
+avg_detections_per_individual_per_station <- detections_per_individual %>%
+  group_by(`Station Name`) %>%
+  summarise(
+    avg_detections = mean(Detections),
+    se_detections = sd(Detections) / sqrt(n()),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  ungroup() %>%
+  mutate(myaxis = paste0(`Station Name`, "\n", "n=", num_transmitters))
+
+# Create the bar plot for average detections per individual with standard error
+ggplot(avg_detections_per_individual_per_station, aes(x = reorder(myaxis, -avg_detections), y = avg_detections)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_errorbar(aes(ymin = avg_detections - se_detections, ymax = avg_detections + se_detections), 
+                width = 0.2, color = "red") +
+  theme_minimal() +
+  labs(title = "Average Detections per Individual with Standard Error at Each Station",
+       x = "Station Name",
+       y = "Average Detections per Individual") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Calculate the number of detections per transmitter at each island
+detections_per_individual_island <- WCO %>%
+  group_by(Island, Transmitter) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Calculate average detections per individual, standard error, and sample size for each island
+avg_detections_per_individual_per_island <- detections_per_individual_island %>%
+  group_by(Island) %>%
+  summarise(
+    avg_detections = mean(Detections),
+    se_detections = sd(Detections) / sqrt(n()),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  ungroup() %>%
+  mutate(myaxis = paste0(Island, "\n", "n=", num_transmitters))
+
+# Create the bar plot for average detections per individual with standard error for each island
+ggplot(avg_detections_per_individual_per_island, aes(x = reorder(myaxis, -avg_detections), y = avg_detections)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_errorbar(aes(ymin = avg_detections - se_detections, ymax = avg_detections + se_detections), 
+                width = 0.2, color = "red") +
+  theme_minimal() +
+  labs(title = "Average Detections per Individual with Standard Error at Each Island",
+       x = "Island",
+       y = "Average Detections per Individual") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Median detections per individual at each Location
+```{r, warning=FALSE}
+
+# Calculate the number of detections per transmitter at each station
+detections_per_individual <- WCO %>%
+  group_by(`Station Name`, Transmitter) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Calculate median detections per individual, IQR, and sample size for each station
+median_detections_per_individual_per_station <- detections_per_individual %>%
+  group_by(`Station Name`) %>%
+  summarise(
+    median_detections = median(Detections),
+    IQR_lower = quantile(Detections, 0.25),
+    IQR_upper = quantile(Detections, 0.75),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  ungroup() %>%
+  mutate(myaxis = paste0(`Station Name`, "\n", "n=", num_transmitters))
+
+# Create the bar plot for median detections per individual with IQR for each station
+ggplot(median_detections_per_individual_per_station, aes(x = reorder(myaxis, -median_detections), y = median_detections)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_errorbar(aes(ymin = IQR_lower, ymax = IQR_upper), width = 0.2, color = "red") +
+  theme_minimal() +
+  labs(title = "Median Detections per Individual with IQR at Each Station",
+       x = "Station Name",
+       y = "Median Detections per Individual") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Calculate the number of detections per transmitter at each island
+detections_per_individual_island <- WCO %>%
+  group_by(Island, Transmitter) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Calculate median detections per individual, IQR, and sample size for each island
+median_detections_per_individual_per_island <- detections_per_individual_island %>%
+  group_by(Island) %>%
+  summarise(
+    median_detections = median(Detections),
+    IQR_lower = quantile(Detections, 0.25),
+    IQR_upper = quantile(Detections, 0.75),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  ungroup() %>%
+  mutate(myaxis = paste0(Island, "\n", "n=", num_transmitters))
+
+# Create the bar plot for median detections per individual with IQR for each island
+ggplot(median_detections_per_individual_per_island, aes(x = reorder(myaxis, -median_detections), y = median_detections)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_errorbar(aes(ymin = IQR_lower, ymax = IQR_upper), width = 0.2, color = "red") +
+  theme_minimal() +
+  labs(title = "Median Detections per Individual with IQR at Each Island",
+       x = "Island",
+       y = "Median Detections per Individual") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Map detections per transmitter per station
+```{r,warning=FALSE}
+
+map_transmitters_per_station <- ggplot() +
+   geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the islands
+  geom_point(data = transmitters_per_station, aes(x = Longitude, y = Latitude, color = Transmitters, size = Transmitters)) +
+  scale_color_viridis_c() +  # Color gradient
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Transmitters per Station", x = "Longitude", y = "Latitude", color = "Transmitters", size = "Transmitters")
+
+map_transmitters_per_station
+
+# Save the plot as an image
+ggsave("map_transmitters_per_station.png", plot = map_transmitters_per_station, width = 10, height = 8, dpi = 300, units = "in")
+
+# Add lat/long to average detections data
+avg_detections_per_individual_per_station <- detections_per_individual %>%
+  group_by(`Station Name`) %>%
+  summarise(
+    avg_detections = mean(Detections),
+    se_detections = sd(Detections) / sqrt(n()),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  left_join(detections_per_station %>% select(`Station Name`, Latitude, Longitude), by = "Station Name") %>%
+  ungroup()
+
+map_avg_detections_per_station <- ggplot() +
+   geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the islands
+  geom_point(data = avg_detections_per_individual_per_station, aes(x = Longitude, y = Latitude, color = avg_detections, size = avg_detections)) +
+  scale_color_viridis_c() +  # Color gradient
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Average Detections per Individual at Each Station", x = "Longitude", y = "Latitude", color = "Average Detections Per Individual", size = "Average Detections Per Individual")
+
+map_avg_detections_per_station
+
+# Save the plot as an image
+ggsave("map_avg_detections_per_station.png", plot = map_avg_detections_per_station, width = 10, height = 8, dpi = 300, units = "in")
+
+# Add lat/long to median detections data
+median_detections_per_individual_per_station <- detections_per_individual %>%
+  group_by(`Station Name`) %>%
+  summarise(
+    median_detections = median(Detections),
+    IQR_lower = quantile(Detections, 0.25),
+    IQR_upper = quantile(Detections, 0.75),
+    num_transmitters = n_distinct(Transmitter)
+  ) %>%
+  left_join(detections_per_station %>% select(`Station Name`, Latitude, Longitude), by = "Station Name") %>%
+  ungroup()
+
+# Create the map for median detections per transmitter per station
+map_median_detections_per_station <- ggplot() +
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the islands
+  geom_point(data = median_detections_per_individual_per_station, aes(x = Longitude, y = Latitude, color = median_detections, size = median_detections)) +
+  scale_color_viridis_c() +  # Color gradient
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Median Detections per Individual at Each Station", x = "Longitude", y = "Latitude", color = "Median Detections Per Individual", size = "Median Detections Per Individual")
+
+# Display the map
+print(map_median_detections_per_station)
+
+# Save the plot as an image
+ggsave("map_median_detections_per_station.png", plot = map_median_detections_per_station, width = 10, height = 8, dpi = 300, units = "in")
+
+```
+
+#______________
+
+## Temporal Stats 
+```{r, warning=FALSE}
+
+
+# Calculate detections per year and island
+detections_per_year_island <- WCO %>%
+  group_by(Year, Island) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Bar plot for Detections per Year colored by Island
+ggplot(detections_per_year_island, aes(x = Year, y = Detections, fill = Island)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(title = "Detections per Year", x = "Year", y = "Detections", fill = "Island")
+
+# Calculate detections per month and island (aggregated across all years)
+detections_per_month_island <- WCO %>%
+  group_by(Month, Island) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Bar plot for Detections per Month colored by Island
+ggplot(detections_per_month_island, aes(x = Month, y = Detections, fill = Island)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(title = "Detections per Month", x = "Month", y = "Detections", fill = "Island")
+
+# Calculate detections per season and island
+detections_per_season_island <- WCO %>%
+  group_by(Season, Island) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Ensure the Season factor is ordered correctly
+detections_per_season_island$Season <- factor(detections_per_season_island$Season, levels = c("Spring", "Summer", "Fall", "Winter"))
+
+# Bar plot for Detections per Season colored by Island
+ggplot(detections_per_season_island, aes(x = Season, y = Detections, fill = Island)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(title = "Detections per Season", x = "Season", y = "Detections", fill = "Island")
+
+```
+
+## Line Plot for Detections Over Time (2020 and After) Colored by Island
+```{r, warning=FALSE}
+
+# Filter for detections from 2020 and after
+WCO_2020to2023 <- WCO %>%
+  filter(Date >= as.Date("2021-06-01"))
+
+# Calculate 7-day moving average for detections
+detections_per_day_island <- WCO_2020to2023 %>%
+  group_by(Date, Island) %>%
+  summarise(Detections = n()) %>%
+  ungroup() %>%
+  group_by(Island) %>%
+  mutate(MovingAvg = rollmean(Detections, k = 7, fill = NA, align = "right"))
+
+# Line plot with moving average
+ggplot(detections_per_day_island, aes(x = Date, y = MovingAvg, color = Island, group = Island)) +
+  geom_line() +
+  theme_minimal() +
+  labs(title = "Detections Over Time with Moving Average (2021 and After)", x = "Date", y = "7-day Moving Average of Detections", color = "Island")
+
+```
+## Animated Detections over time
+```{r}
+
+# Aggregate detections per station and month
+detections_per_station_month <- WCO_2020to2023 %>%
+  group_by(Longitude, Latitude, Island, Year, Month) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+# Extract unique coordinates and station names
+unique_coordinates <- WCO_2020to2023 %>%
+  select(`Station Name`, Longitude, Latitude) %>%
+  distinct()
+
+# Check for stations with multiple coordinates
+stations_with_multiple_coords <- unique_coordinates %>%
+  group_by(`Station Name`) %>%
+  filter(n() > 1) %>%
+  arrange(`Station Name`)
+
+# Print the results
+print(unique_coordinates)
+print(stations_with_multiple_coords)
+
+# Create a Bi-weekly column for easier plotting
+detections_per_station_biweekly <- WCO_2020to2023 %>%
+  mutate(Biweekly = as.Date(cut(Date, breaks = "15 days"))) %>%
+  group_by(Longitude, Latitude, Island, Year = year(Biweekly), Biweekly) %>%
+  summarise(Detections = n()) %>%
+  ungroup()
+
+base_plot <- ggplot() + 
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_biweekly, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+  scale_color_viridis_c() +  # Color gradient
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(x = "Longitude", y = "Latitude", color = "Detections", size = "Detections")
+
+# Create the animation
+animation_plot <- base_plot +
+  geom_point(data = detections_per_station_biweekly, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+  transition_manual(Biweekly) +
+  labs(title = "Detections per Station: {current_frame}")
+
+```
+
+
+### Animate and save
+```{r, eval=FALSE}
+
+animate(animation_plot, nframes = length(unique(detections_per_station_biweekly$Biweekly)), fps = 1, width = 800, height = 600, renderer = gifski_renderer("detections_animation_biweekly.gif"))
+
+```
+#_______________
+
+# Tables
+
+## Overview All Transmitters
+```{r, warning=FALSE}
+
+# Create summary table for with Freedman Parameters
+transmitter_summary_freedman <- WCO %>%
+  group_by(Transmitter) %>%
+  summarise(
+    `Date First Detection` = min(Date),
+    `Date Last Detection` = max(Date),
+    `Detection Span (Days)` = as.numeric(difftime(max(Date), min(Date), units = "days")),
+    `Total Days Detected` = n_distinct(Date),
+    `Total Detections` = n(),
+    `Total Stations Detected` = n_distinct(`Station Name`),
+    `Total Islands Detected` = n_distinct(Island)
+  ) %>%
+  arrange(desc(`Total Stations Detected`))
+
+# Print the summary table
+print(transmitter_summary_freedman)
+
+# Export the summary table as a CSV file
+write.csv(transmitter_summary_freedman, "transmitter_summary_freedman.csv", row.names = FALSE)
+
+# Conversion factor for degrees of longitude to kilometers at the equator
+km_per_degree_longitude <- 111.32
+
+# Create summary table for the  Nosal parameters
+transmitter_summary_nosal <- WCO %>%
+  group_by(Transmitter) %>%
+  summarise(
+    `Total Days Detected` = n_distinct(Date),
+    `Min Longitude` = min(Longitude),
+    `Max Longitude` = max(Longitude)
+  ) %>%
+  mutate(
+    `Max Distance Traveled (km)` = (`Max Longitude` - `Min Longitude`) * km_per_degree_longitude
+  ) %>%
+  arrange(desc(`Max Distance Traveled (km)`))
+
+# Print the summary table
+print(transmitter_summary_nosal)
+
+# Export the summary table as a CSV file
+write.csv(transmitter_summary_nosal, "transmitter_summary_nosal.csv", row.names = FALSE)
+
+```
+
+## Species Table
+```{r}
+
+# Function to create the summary table for each species
+species_summary <- function(species_name) {
+  species_filtered <- WCO %>%
+    filter(SciName == species_name)
+  
+  # Calculate the number of days each transmitter was detected
+  days_detected_per_transmitter <- species_filtered %>%
+    group_by(Transmitter) %>%
+    summarise(`Days Detected` = n_distinct(Date))
+  
+  summary <- species_filtered %>%
+    summarise(
+      Species = species_name,
+      Transmitters = n_distinct(Transmitter),
+      Detections = n(),
+      `Date First Detected` = min(Date),
+      `Date Last Detected` = max(Date),
+      `Detection Span (Days)` = as.numeric(difftime(max(Date), min(Date), units = "days")),
+      `Average Number of Days Detected per Transmitter` = mean(days_detected_per_transmitter$`Days Detected`),
+      `SD Number of Days Detected per Transmitter` = ifelse(n_distinct(Transmitter) > 2, 
+                                                            sd(days_detected_per_transmitter$`Days Detected`), NA),
+      `Total Stations Detected` = n_distinct(`Station Name`),
+      `Total Islands Detected` = n_distinct(Island)
+    )
+  
+  return(summary)
+}
+
+# Get the list of unique species names excluding NA values
+species_list <- WCO %>%
+  filter(!is.na(SciName)) %>%
+  distinct(SciName) %>%
+  pull(SciName)
+
+# Create the summary table for each species and combine into one dataframe
+species_comparison <- lapply(species_list, species_summary) %>%
+  bind_rows() %>%
+  arrange(desc(Transmitters))
+
+# Print the summary table
+print(species_comparison)
+
+# Export the summary table as a CSV file
+write.csv(species_comparison, "species_comparison_summary.csv", row.names = FALSE)
+
+```
+
+## Top Species Tables for White Shark, Bat Rays, and Soupfin
+```{r}
+
+# Define the species names
+Top_Species <- c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")
+
+# Conversion factor for degrees of longitude to kilometers at the equator
+km_per_degree_longitude <- 111.32
+
+# Function to create summary table for each species
+Top_Species_table <- function(species_name) {
+  Top_Species_table_filtered <- WCO %>%
+    filter(SciName == species_name)
+  
+  Top_Species_summary <- Top_Species_table_filtered %>%
+    group_by(Transmitter) %>%
+    summarise(
+      `when_encountered` = first(na.omit(when_encountered)),
+      `Date First Detection` = min(Date),
+      `Date Last Detection` = max(Date),
+      `est_tag_expiry_date` = first(na.omit(est_tag_expiry_date)),
+      `Detection Span (Days)` = as.numeric(difftime(max(Date), min(Date), units = "days")),
+      `Total Days Detected` = n_distinct(Date),
+      `Total Detections` = n(),
+      `Total Stations Detected` = n_distinct(`Station Name`),
+      `Total Islands Detected` = n_distinct(Island),
+      `Min Longitude` = min(Longitude),
+      `Max Longitude` = max(Longitude),
+      `Max Distance Traveled (km)` = (`Max Longitude` - `Min Longitude`) * km_per_degree_longitude,
+      `sex` = first(na.omit(sex))
+    ) %>%
+    arrange(desc(`Total Detections`))
+  
+  if (species_name %in% c("Carcharodon carcharias", "Galeorhinus galeus")) {
+    Top_Species_summary <- Top_Species_summary %>%
+      left_join(WCO %>% select(Transmitter, TNL_cm) %>% distinct(), by = "Transmitter")
+  } else if (species_name == "Myliobatis californica") {
+    Top_Species_summary <- Top_Species_summary %>%
+      left_join(WCO %>% select(Transmitter, disk_length) %>% distinct(), by = "Transmitter")
+  }
+
+  # Print the summary table
+  print(Top_Species_summary)
+  
+  # Export the summary table as a CSV file
+  filename <- paste0("transmitter_summary_", gsub(" ", "_", species_name), ".csv")
+  write.csv(Top_Species_summary, filename, row.names = FALSE)
+}
+
+# Create summary tables for each species
+for (species in Top_Species) {
+  Top_Species_table(species)
+}
+
+```
+
+#_______________
+
+#Filtered for Species
+## Top Species
+
+### Map
+```{r}
+
+# Define the species names
+Top_Species <- c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")
+
+# Function to create map for each species
+create_species_map <- function(species_name) {
+  # Filter the data for the species
+  species_data <- WCO %>%
+    filter(SciName == species_name)
+  
+  # Calculate the summaries for the species
+  detections_per_individual <- species_data %>%
+    group_by(`Station Name`, Transmitter) %>%
+    summarise(Detections = n()) %>%
+    ungroup()
+  
+  avg_detections_per_individual_per_station <- detections_per_individual %>%
+    group_by(`Station Name`) %>%
+    summarise(
+      avg_detections = mean(Detections),
+      num_transmitters = n_distinct(Transmitter)
+    ) %>%
+    left_join(detections_per_station %>% select(`Station Name`, Latitude, Longitude), by = "Station Name") %>%
+    ungroup()
+  
+  # Create the map
+  map <- ggplot() +
+    geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+    geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the islands
+    geom_point(data = avg_detections_per_individual_per_station, 
+               aes(x = Longitude, y = Latitude, color = num_transmitters, size = avg_detections)) +
+    scale_color_viridis_c() +  # Color gradient
+    coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),  # White background
+      plot.background = element_rect(fill = "white", color = NA),   # White plot background
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = paste("Detections per Individual for", species_name, "at Each Station"),
+         x = "Longitude", y = "Latitude", color = "Number of Individuals", size = "Average Detections Per Individual")
+  
+  # Save the plot as an image
+  filename <- paste0("map_avg_detections_per_station_", gsub(" ", "_", species_name), ".png")
+  ggsave(filename, plot = map, width = 10, height = 8, dpi = 300, units = "in")
+  
+  return(map)
+}
+
+# Create and save maps for each top species
+for (species in Top_Species) {
+  create_species_map(species)
+}
+
+```
+
+### Animated Map
+```{r, eval=FALSE}
+
+# Function to create animated map for a species
+create_species_animation <- function(species_name) {
+  # Filter the data for the species
+  species_data <- WCO %>%
+    filter(SciName == species_name)
+  
+  # Aggregate detections per station and biweekly period
+  detections_per_station_biweekly <- species_data %>%
+    mutate(Biweekly = as.Date(cut(Date, breaks = "15 days"))) %>%
+    group_by(Longitude, Latitude, Island, Year = year(Biweekly), Biweekly) %>%
+    summarise(Detections = n()) %>%
+    ungroup()
+  
+  # Create the base plot
+  base_plot <- ggplot() + 
+    geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+    geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+    geom_point(data = detections_per_station_biweekly, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+    scale_color_viridis_c() +  # Color gradient
+    coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),  # White background
+      plot.background = element_rect(fill = "white", color = NA),   # White plot background
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(x = "Longitude", y = "Latitude", color = "Detections", size = "Detections")
+  
+  # Create the animation
+  animation_plot <- base_plot +
+    geom_point(data = detections_per_station_biweekly, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+    transition_manual(Biweekly) +
+    labs(title = paste("Detections per Station for", species_name, ": {current_frame}"))
+
+  # Save the animation
+  filename <- paste0("detections_animation_biweekly_", gsub(" ", "_", species_name), ".gif")
+  animate(animation_plot, nframes = length(unique(detections_per_station_biweekly$Biweekly)), fps = 1, width = 800, height = 600, renderer = gifski_renderer(filename))
+}
+
+# Define the species names
+Top_Species <- c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")
+
+# Create animations for each top species
+for (species in Top_Species) {
+  create_species_animation(species)
+}
+
+```
+
+### Detections Over time
+```{r}
+
+# Function to create a line plot with moving average for a species
+create_species_plot <- function(species_name) {
+  # Filter the data for the species
+  species_data <- WCO %>%
+    filter(SciName == species_name)
+  
+  # Calculate 7-day moving average for detections
+  detections_per_day_island <- species_data %>%
+    group_by(Date, Island) %>%
+    summarise(Detections = n(), .groups = "drop") %>%
+    group_by(Island) %>%
+    mutate(MovingAvg = rollmean(Detections, k = 7, fill = NA, align = "right"))
+  
+  # Line plot with moving average
+  plot <- ggplot(detections_per_day_island, aes(x = Date, y = MovingAvg, color = Island, group = Island)) +
+    geom_line() +
+    theme_minimal(base_size = 15) +  # Increase base font size for better readability
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),  # White background
+      plot.background = element_rect(fill = "white", color = NA),   # White plot background
+      panel.grid.major = element_line(color = "grey80"),            # Light grey grid lines
+      panel.grid.minor = element_line(color = "grey90")             # Even lighter grid lines
+    ) +
+    labs(title = paste("Detections Over Time with Moving Average for", species_name), x = "Date", y = "7-day Moving Average of Detections", color = "Island")
+  
+  # Save the plot
+  filename <- paste0("detections_moving_avg_", gsub(" ", "_", species_name), ".png")
+  ggsave(filename, plot = plot, width = 10, height = 6, dpi = 300)
+  
+  return(plot)
+}
+
+# Create and save plots for each top species
+for (species in Top_Species) {
+  create_species_plot(species)
+}
+
+```
+
+#_______________
+
+# Filtered For Transmitters 
+## Abacus Plots for top 10 Detections and Distance
+```{r, warning=FALSE}
+
+# Combined list top 10 transmitters
+Top10 <- c("A69-9001-22774", "A69-9001-24655", "A69-1601-27075", "A69-9001-12159", "A69-1303-46140", "A69-1601-62047", "A69-1601-62096", "A69-1602-3228", "A69-1602-8666", "A69-1602-58589")
+
+# List of specified transmitters
+Top10_1 <- c("A69-9001-22774", "A69-9001-24655", "A69-1601-27075", "A69-9001-12159", "A69-1303-46140")
+Top10_2 <- c("A69-1601-62047", "A69-1601-62096", "A69-1602-3228", "A69-1602-8666", "A69-1602-58589")
+
+# Define the order of islands and stations in descending order
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland")
+station_order <- c("WCO_Cuyler", "WCO_Tyler Bight", "WCO_Carrington Point", "WCO_Johnson's Lee",
+                   "WCO_Hazards_Profile", "WCO_Trailers", "WCO_MorsePoint", "WCO_Valley",
+                   "WCO_Smugglers", "WCO_Scorpion", "WCO_Pelican", "WCO_Winfield Scott",
+                   "WCO_Anacapa South", "WCO_Mohawk LTER", "WCO_Carpinteria")
+
+# Create a list of shapes to use for each transmitter
+shapes <- c(15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+
+# Custom colors for the transmitters
+custom_colors <- c("#C58ABB", "#B73944", "#8ACE89", "#C15901", "#0072B2", 
+                   "#656565", "#009E73", "#56B4E9", "#E69F00", "#000000")
+
+# Function to process the dataset
+process_data <- function(data, transmitters) {
+  data %>%
+    filter(Transmitter %in% transmitters) %>%
+    mutate(Island = factor(Island, levels = island_order),
+           `Station Name` = factor(`Station Name`, levels = station_order))
+}
+
+# Process the datasets
+WCO_Top10_1 <- process_data(WCO, Top10_1)
+WCO_Top10_2 <- process_data(WCO, Top10_2)
+
+# Create the abacus plot for Station
+ggplot(WCO_Top10_1, aes(x = `Date`, y = `Station Name`, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(size = 3, width = 0.4, height = 0.35) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Station",
+       color = "Transmitter",
+       shape = "Transmitter") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create the abacus plot for Islands
+ggplot(WCO_Top10_1, aes(x = `Date`, y = Island, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(size = 3, width = 0.4, height = 0.35) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Island",
+       color = "Transmitter",
+       shape = "Transmitter") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create the abacus plot for Station
+ggplot(WCO_Top10_2, aes(x = `Date`, y = `Station Name`, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(size = 3, width = 0.4, height = 0.35) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Station",
+       color = "Transmitter",
+       shape = "Transmitter") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create the abacus plot for Islands
+ggplot(WCO_Top10_2, aes(x = `Date`, y = Island, color = Transmitter, shape = Transmitter)) +
+  geom_jitter(size = 3, width = 0.4, height = 0.35) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = shapes) +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Island",
+       color = "Transmitter",
+       shape = "Transmitter") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create the faceted abacus plot for individual transmitters
+ggplot(WCO_Top10_1, aes(x = `Date`, y = `Island`)) +
+  geom_point(color = "black") +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Island") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ Transmitter, scales = "free_y", ncol = 1)
+
+# Create the faceted abacus plot for individual transmitters
+ggplot(WCO_Top10_2, aes(x = `Date`, y = `Island`)) +
+  geom_point(color = "black") +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Island") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ Transmitter, scales = "free_y", ncol = 1)
+
+```
+
+## Map for top 10 Detections and Distance
+```{r, warning=FALSE}
+
+# Filter the dataset for the top 10 transmitters
+WCO_Top10 <- WCO %>%
+  filter(Transmitter %in% Top10)
+
+# Summarize detections per station for the specified transmitters
+detections_per_station_Top10 <- WCO_Top10 %>%
+  group_by(`Station Name`, Latitude, Longitude) %>%
+  summarise(Detections = n()) %>%  # Using n() to count the number of detections
+  ungroup()
+
+# Create the scatter plot for detections per station with shapefile
+map_Top10_detections <- ggplot() +
+  geom_sf(data = coast, color= "black") +
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_Top10, aes(x = Longitude, y = Latitude, color = Detections, size = Detections)) +
+  scale_color_viridis_c() +  # Color gradient
+  scale_size_continuous(range = c(3, 10)) +  # Scale point sizes up
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Detections per Station", x = "Longitude", y = "Latitude", color = "Detections", size = "Detections")
+
+map_Top10_detections
+
+# Save the plot as an image
+ggsave("detections_per_station_Top10.png", plot = map_Top10_detections, width = 10, height = 8, dpi = 300, units = "in")
+
+```
+
+## Johnson's Lee April-July 2023
+```{r, warning=FALSE}
+
+# Filter the dataset for the specific station and date range
+transmitters_johnsons_lee <- WCO %>%
+  filter(`Station Name` == "WCO_Johnson's Lee",
+         Date >= as.Date("2023-04-01") & Date <= as.Date("2023-07-31")) %>%
+  select(Transmitter) %>%
+  distinct()
+
+# Print the unique transmitters
+print(transmitters_johnsons_lee)
+
+# Abacus for Johnson's Lee Transmitters
+
+# List of specified transmitters
+Johnsons_Transmitters <- c("A69-1601-62047", "A69-1601-62096", "A69-9001-55586", "A69-9001-2552")
+
+# Filter the dataset for the specified transmitters
+Filtered_Johnsons_Transmitters <- WCO %>%
+  filter(Transmitter %in% Johnsons_Transmitters)
+
+# Create the faceted abacus plot for individual transmitters
+ggplot(Filtered_Johnsons_Transmitters, aes(x = Date, y = Island)) +
+  geom_point(color = "black") +
+  theme_minimal() +
+  labs(title = NULL,
+       x = "Year",
+       y = "Island") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ Transmitter, scales = "free_y", ncol = 1)
+
+```
+
+# Make Abacus for Myliobatis californica
+```{r, warning=FALSE}
+
+str(WCO)
+
+# Filter the dataset for the specific species
+Filtered_Myliobatis <- WCO %>%
+  filter(SciName == "Myliobatis californica")
+
+  # Create abacus plot with time (binned by date) on the y axis and island on the x axis in order based on longitude (from west to east) and all the individuals labeled with unique colors and shapes.
+mylobatis_abacus <- ggplot(Filtered_Myliobatis, aes(x = Island, y = Date, color = Transmitter, shape = Transmitter)) +  # Specify the x and y aesthetics      
+  geom_jitter(size = 3, width = 0.4, height = 0.35) +  # Add jittered points with specified size and width/height
+  scale_color_manual(values = custom_colors) +  # Set custom
+  scale_shape_manual(values = shapes) +  # Set custom shapes
+  theme_minimal() +  # Apply a minimal theme
+  labs(title = NULL, x = "Island", y = "Date", color = "Transmitter", shape = "Transmitter") +  # Set the axis labels and title
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+  print(mylobatis_abacus)
+
+  # export the plot as an image with white background
+ggsave("Abacus_Plot_Myliobatis.png", plot = mylobatis_abacus, width = 10, height = 8, dpi = 300, units = "in")
+```

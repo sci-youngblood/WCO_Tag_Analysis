@@ -1,0 +1,382 @@
+---
+title: "Kickback Tag Data"
+author: "Morgan Youngblood"
+date: "06/9/2024"
+---
+ 
+
+# Load data
+```{r load_data, echo=FALSE}
+
+# Load libraries
+library(dplyr)
+library(readr) 
+library(readxl)
+
+# Load reciever data
+reciever_data <- read_csv("data/og_detection-data_cinms-wco_20231024_01.csv")
+
+# Load tag data
+LoweLab <- readRDS("data/LoweLabTagInfo (1).rds")
+
+# View structure of each dataset to determine how to merge
+str(reciever_data)
+str(LoweLab)
+
+# which columns have NA values in the LoweLab dataset
+colSums(is.na(LoweLab))
+
+```
+
+# Merge Data
+```{r merge_Lowe_data, echo=FALSE}
+
+# Merge data from both datasets by the "Transmitter" column
+Lowe_Detection_data <- reciever_data %>%
+  left_join(LoweLab, by = c ("Transmitter" = "Transmitter"))
+
+# View structure of merged data
+str(Lowe_Detection_data)
+
+# Filter data for matching transmitters
+Lowe_Detection_data <- Lowe_Detection_data %>%
+    filter(!is.na(Owner))
+
+# Write filtered data to a .csv file
+write_csv(Lowe_Detection_data, "data/Lowe_Detection_20231024.csv")
+
+# Write filtered data to a .rds file
+saveRDS(Lowe_Detection_data, "data/Lowe_Detection_20231024.rds")
+
+# View the first few rows of the merged data
+head(Lowe_Detection_data)
+
+```
+
+# Load and Merge Data
+```{r merge_Nosal_data, echo=FALSE}
+
+# Load Nosal data
+Nosal <- readxl::read_xlsx("data/Nosal_Soupfin_Tag_IDs_2024.xlsx")
+
+# View structure of each dataset to determine how to merge
+str(Nosal)
+str(reciever_data)
+
+# Which columns have NA values in the Nosal dataset
+colSums(is.na(Nosal))
+
+ # Merge "Tag_ID_Combined" from Nosal data with "Transmitter" from reciever data
+Nosal_Detection_data <- reciever_data %>%
+  left_join(Nosal, by = c("Transmitter" = "Tag_ID_Combined"))
+
+# View structure of merged data
+str(Nosal_Detection_data)
+
+# Filter data for matching transmitters
+Nosal_Detection_data <- Nosal_Detection_data %>%
+    filter(!is.na(Species))
+
+# Write filtered data to a .csv file
+write_csv(Nosal_Detection_data, "data/Nosal_Detection_20231024.csv")
+
+# Look at the number of unique Transmitters in the Nosal_Detection_data
+length(unique(Nosal_Detection_data$Transmitter))
+
+```
+
+# Load and Merge Data
+```{r update_Block_data, echo=FALSE}
+
+# Load Block data
+Block <- read.csv("data/block_tags_2024june7.csv")
+
+# View structure of each dataset to determine how to merge
+str(Block)
+str(reciever_data)
+
+# Which columns have NA values in the Block dataset
+colSums(is.na(Block))
+
+# Merge "codespace" from Block data with "Transmitter" from reciever data
+Block_Detection_data <- reciever_data %>%
+  left_join(Block, by = c("Transmitter" = "codespace"))
+
+# View structure of merged data
+str(Block_Detection_data)
+
+# Filter data for matching transmitters
+Block_Detection_data <- Block_Detection_data %>%
+    filter(!is.na(commonname))
+
+# Write filtered data to a .csv file
+write_csv(Block_Detection_data, "data/Block_Detection_20231024.csv")
+
+# Look at how many unique Transmitters are in the Block_Detection_data
+length(unique(Block_Detection_data$Transmitter))
+
+```
+
+# Merge Block Data into ongoing Tag Data
+```{r update_unknown_data, echo=FALSE}
+
+Unknown_data <- read_csv("data/Unknown_Tag_Data.csv")
+
+# View structure of sorted data and Block data to determine how to merge
+str(Unknown_data)
+str(Block)
+
+# How many unique "codespace" values are in the Block data
+length(unique(Block$codespace))
+
+# See how many "codespace" values in the Block data match the "Transmitter" values in the Unknown data
+sum(Unknown_data$Transmitter %in% Block$codespace)
+
+# Merge Block data with sorted_Tag_Data.csv by the "Transmitter" column
+merged_Block_data <- Unknown_data %>%
+    left_join(Block, by = c("Transmitter" = "codespace"))
+
+# View structure of merged data
+str(merged_Block_data)
+
+# Change the column names of "merged_Block_data" to match the column names of "sorted_Tag_Data.csv"
+colnames(merged_Block_data) <- c("Transmitter", "number_of_detections", "first_detection", "last_detection", "SciName", "when_encountered", "seriesname", "TNL_cm", "eventid")
+
+# Check colnames of "merged_Block_data"
+colnames(merged_Block_data)
+
+# Change all SciName = "White Shark" to "Carcharodon carcharias" in the merged_Block_data
+merged_Block_data$SciName[merged_Block_data$SciName == "White Shark"] <- "Carcharodon carcharias"
+
+# Filter data for matching transmitters
+merged_Block_data <- merged_Block_data %>%
+    filter(!is.na(SciName))
+
+    # Remove seriesname and eventid columns from merged_Block_data
+merged_Block_data <- merged_Block_data %>%
+    select(-seriesname, -eventid)
+
+# Load sorted_Tag_Data.csv
+sorted_data <- read_csv("data/sorted_Tag_Data.csv")
+
+#view structure of sorted data
+str(sorted_data)
+
+# Merge the datasets on the Transmitter column
+Tag_ID_6_9 <- sorted_data %>%
+  left_join(merged_Block_data, by = "Transmitter")
+
+# Combine SciName.x and SciName.y into a single SciName column
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(SciName = if_else(is.na(SciName.y), SciName.x, SciName.y)) %>%
+  select(-SciName.x, -SciName.y)
+
+  # Do the same for "TNL_cm", "when_encountered", "last_detection", 'first_detection', and "number_of_detections" columns
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(TNL_cm = if_else(is.na(TNL_cm.y), TNL_cm.x, TNL_cm.y)) %>%
+  select(-TNL_cm.x, -TNL_cm.y)
+
+# Change when_encountered column to Date format
+Tag_ID_6_9$when_encountered.y <- as.Date(Tag_ID_6_9$when_encountered.y, format = "%m/%d/%Y")
+
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(when_encountered = if_else(is.na(when_encountered.y), when_encountered.x, when_encountered.y)) %>%
+  select(-when_encountered.x, -when_encountered.y)
+
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(last_detection = if_else(is.na(last_detection.y), last_detection.x, last_detection.y)) %>%
+  select(-last_detection.x, -last_detection.y)
+
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(first_detection = if_else(is.na(first_detection.y), first_detection.x, first_detection.y)) %>%
+  select(-first_detection.x, -first_detection.y)
+
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(number_of_detections = if_else(is.na(number_of_detections.y), number_of_detections.x, number_of_detections.y)) %>%
+  select(-number_of_detections.x, -number_of_detections.y)
+
+# View the merged data
+str(Tag_ID_6_9)
+head(Tag_ID_6_9)
+
+# Export the merged dataset to a CSV file
+write_csv(Tag_ID_6_9, "outputs/Updated_Tag_ID_20240609.csv")
+
+# Filter the dataset for rows where SciName is NA
+NA_Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  filter(is.na(SciName)) %>%
+  select(Transmitter, first_detection, last_detection)
+
+# Export the filtered dataset to a .csv file
+write_csv(NA_Tag_ID_6_9, "outputs/NA_Tag_ID_20240609.csv")
+
+```
+
+# Merge Nosal Data into ongoing Tag Data
+```{r update_Nosal_data, echo=FALSE}
+
+# View structure of Nosal data and Tag_ID_6_9 to determine how to merge
+str(Nosal)
+str(Tag_ID_6_9)
+
+# Filter unnecessary columns from the Nosal data
+Nosal <- Nosal %>%
+  select(-V16_ID, -Code_Space)
+
+# Merge the datasets on the Transmitter column
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  left_join(Nosal, by = c("Transmitter" = "Tag_ID_Combined"))
+
+# View structure of merged data
+str(Tag_ID_6_9)
+
+# Use mutate to combine the columns from the two datasets
+## mutate SciName
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(Species = if_else(is.na(SciName), Species, SciName)) %>%
+  select(-Species)
+
+## mutate TNL_cm
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(TNL_cm = if_else(is.na(TNL_cm), TL, TNL_cm)) %>%
+  select(-TL)
+
+## mutate sex
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(sex = if_else(is.na(sex), Sex, sex)) %>%
+  select(-Sex)
+
+## mutate when_encountered
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(when_encountered = if_else(is.na(when_encountered), Tagging_Date, when_encountered)) %>%
+  select(-Tagging_Date)
+
+## mutate tag_location
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(tag_location = if_else(is.na(tag_location), Tagging_Region, tag_location)) %>%
+  select(-Tagging_Region)
+
+## mutate Transmitter_SN
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(Transmitter_SN = if_else(is.na(Transmitter_SN), V16_SN, Transmitter_SN)) %>%
+  select(-V16_SN)
+
+# View the merged data
+str(Tag_ID_6_9)
+
+# Export the merged dataset to a CSV file
+write_csv(Tag_ID_6_9, "outputs/Updated_Tag_ID_20240611.csv")
+
+# Filter the dataset for rows where SciName is NA
+NA_Tag_ID_6_11 <- Tag_ID_6_9 %>%
+  filter(is.na(when_encountered)) %>%
+  select(Transmitter, SciName, first_detection, last_detection)
+
+# Export the filtered dataset to a .csv file
+write_csv(NA_Tag_ID_6_11, "outputs/NA_Tag_ID_20240611.csv")
+
+# Look at how many FL are NA in the Tag_ID_6_9 dataset to see how many Nosal Tag data were added
+sum(!is.na(Tag_ID_6_9$FL))
+
+# Look at Transmitters where SciName are Galeorhinus galeus in the Tag_ID_6_9 dataset and FL is NA
+Unknown_Galeorhinus <- Tag_ID_6_9 %>%
+  filter(SciName == "Galeorhinus galeus" & is.na(FL))
+
+# Count the number of unique transmitters in the Unknown_Galeorhinus dataset
+length(unique(Unknown_Galeorhinus$Transmitter))
+
+# Write .csv file for Unknown_Galeorhinus with columns Transmitter, number_of_detections, first_detection, and last_detection
+write_csv(Unknown_Galeorhinus, "outputs/Unknown_Galeorhinus_20240611.csv")
+```
+
+# Create Filtered Detections Data file for Myliobatis californica for Alyssa
+```{r create_Myliobatis_data, echo=FALSE}
+
+Total_detections <- read.csv("data/og_detection-data_cinms-wco_20231024_01.csv")
+
+str(Total_detections)
+
+# Filter data for transmitter A69-1602-12253
+Detections_12253 <- Total_detections %>%
+  filter(Transmitter == "A69-1602-12253")
+
+view structure of Myliobatis data
+str(Detections_12253)
+
+# Write filtered data to a .csv file
+write_csv(Detections_12253, "data/Detections_12253_20240611.csv")
+```
+
+# Filter detection data for OSU Sevengill Transmitter # A69-9001-2552
+```{r filter_2552_data, echo=FALSE}
+
+# Filter data for Transmitter A69-9001-2552
+A69_9001_2552_data <- Total_detections %>%
+  filter(Transmitter == "A69-9001-2552")
+
+# Write filtered data to a .csv file
+write_csv(A69_9001_2552_data, "outputs/A69_9001_2552_detections_20240611.csv")
+
+```
+
+# Incorporate Lowe Update into ongoing Tag Data
+```{r update_Lowe_data, echo=FALSE}
+
+# Read in updated data
+tag_id_up <- read.csv("data/Tag_ID_20240611.csv")
+
+
+# Read in Lowe Lab update xlxs file
+Lowe_update <- readxl::read_xlsx("data/DDT+taggingJune2024-Lowe.xlsx")
+
+# View structure of each dataset to determine how to merge
+str(tag_id_up)
+str(Lowe_update)
+
+# Extract the last 5 digits from the "Transmitter" column
+tag_id_up$last_5_digits <- substr(tag_id_up$Transmitter, nchar(tag_id_up$Transmitter) - 4, nchar(tag_id_up$Transmitter))
+
+# Change "internal tag ID" column to character in the Lowe data
+Lowe_update$`internal tag ID` <- as.character(Lowe_update$`internal tag ID`)
+
+# make sure the last_5_digits column is character
+tag_id_up$last_5_digits <- as.character(tag_id_up$last_5_digits)
+
+# Merge based on the "last_5_digits" column in tag_id_up and the "internal tag ID" column in Lowe_update
+tag_id_up <- tag_id_up %>%
+  left_join(Lowe_update, by = c("last_5_digits" = "internal tag ID"))
+
+# Remove the "last_5_digits" column
+tag_id_up <- tag_id_up %>%
+  select(-last_5_digits)
+
+# View structure of merged data
+str(tag_id_up)
+
+# see how many transmitters merged by looking at how many "Internal tag type" values are not NA
+sum(!is.na(tag_id_up$`Internal tag type`))
+
+# Make list of which transmitters were updated by looking at the "Internal tag type" values that are not NA and seeing which transmitters are associated with them
+new_transmitters <- unique(tag_id_up$Transmitter[!is.na(tag_id_up$`Internal tag type`)])
+
+new_transmitters
+
+```
+
+# Send Noah Ben-Aderet's yellowtail data
+```{r send_yellowtail_data, echo=FALSE}
+
+# Load OG detection data
+OG_detection_data <- read.csv("data/og_detection-data_cinms-wco_20231024_01.csv")
+
+# Filter for Transmitter A69-1601-27071
+A69_1601_27071 <- OG_detection_data %>%
+  filter(Transmitter == "A69-1601-27071")
+
+# view structure of A69_1601_27071
+str(A69_1601_27071)
+
+# Write filtered data to a .csv file
+write_csv(A69_1601_27071, "outputs/A69_1601_27071_detections_20240611.csv")
+```
+

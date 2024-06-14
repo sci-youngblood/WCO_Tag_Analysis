@@ -1,0 +1,178 @@
+---
+title: "Cleaning WCO Data and adding Tag info"
+output: wco_detections+tags_20240613.csv
+Author: "Morgan Youngblood"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## GitHub Documents
+
+This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+
+# Load Libraries to read csv and merge/ clean data
+```{r}
+library(dplyr)
+library(readr)
+library(tidyr)
+```
+
+# Read in the WCO data
+```{r}
+
+tag_data <- read_csv("data/Updated_Tag_ID_20240611.csv")
+str(tag_data)
+
+
+wco_raw <- read_csv("data/og_detection-data_cinms-wco_20231024_01.csv")
+str(wco_raw)
+problems(wco_raw)
+```
+
+# WCO Data Cleaning and Setup
+
+## Remove NA columns in the WCO data
+```{r}
+# Find columns where all values are NA
+columns_to_remove <- sapply(wco_raw, function(x) all(is.na(x)))
+
+columns_to_remove
+
+# Remove Transmitter Type and Sensor Precision columns
+wco_clean <- select(wco_raw, -'Transmitter Type', -'Sensor Precision')
+
+colnames(wco_clean)
+```
+
+## Set up time columns
+```{r}
+# Convert Date and Time (UTC) to local timezone
+wco_clean$Local_Time <- as.POSIXct(wco_clean$`Date and Time (UTC)`, tz = "America/Los_Angeles")
+
+# Extract date component
+wco_clean$Date <- as.Date(wco_clean$Local_Time)
+
+# Extract month and year from Date
+wco_clean$Month <- format(wco_clean$Date, "%m")
+wco_clean$Year <- format(wco_clean$Date, "%Y")
+wco_clean$Hour <- format(wco_clean$Local_Time, "%H")
+
+# Define seasons based on the month
+wco_clean$Season <- with(wco_clean, ifelse(Month %in% c("03", "04", "05"), "Spring",
+                        ifelse(Month %in% c("06", "07", "08"), "Summer",
+                        ifelse(Month %in% c("09", "10", "11"), "Fall",
+                        "Winter"))))
+
+head(wco_clean)
+
+colnames(wco_clean)
+
+# Evaluate summary statistics for the new columns
+summary(wco_clean$Local_Time)
+summary(wco_clean$Date)
+summary(wco_clean$Month)
+summary(wco_clean$Year)
+summary(wco_clean$Hour)
+
+```
+
+### Filter Spurious detections using the date
+```{r}
+
+# Filter detections where there are < 2 detections per day
+wco_clean <- wco_clean %>%
+  group_by(Date) %>%
+  filter(n() > 1)
+
+# Evaluate the number of detections filtered
+nrow(wco_clean)
+nrow(wco_raw)
+
+```
+
+## Set up spatial data
+
+### Group stations by island
+```{r}
+
+# Create a mapping of stations to islands
+station_to_island <- data.frame(
+  `Station Name` = c("WCO_Cuyler", "WCO_Tyler Bight",
+                     "WCO_Carrington Point", "WCO_Johnson's Lee",
+                     "WCO_Hazards_Profile", "WCO_Trailers",
+                     "WCO_MorsePoint", "WCO_Valley", "WCO_Smugglers",
+                     "WCO_Scorpion", "WCO_Pelican",
+                     "WCO_Winfield Scott", "WCO_Anacapa South",
+                     "WCO_Mohawk LTER", "WCO_Carpinteria"),
+  Island = c("San Miguel", "San Miguel",
+             "Santa Rosa", "Santa Rosa",
+             "Santa Cruz", "Santa Cruz",
+             "Santa Cruz", "Santa Cruz", "Santa Cruz",
+             "Santa Cruz", "Santa Cruz",
+             "Anacapa", "Anacapa",
+             "Mainland", "Mainland")
+)
+
+# Ensure column names match exactly
+colnames(station_to_island) <- c("Station Name", "Island")
+
+# Perform the join to add island information
+wco_clean <- wco_clean %>%
+  left_join(station_to_island, by = "Station Name")
+
+colnames(wco_clean)
+
+# Make sure Islands and Stations are matched correctly
+unique(wco_clean$Island)
+unique(wco_clean$`Station Name`)
+
+# Make all stations where Island is NA 'Santa Barbara' Island
+wco_clean$Island[is.na(wco_clean$Island)] <- "Santa Barbara"
+
+# Group by Island and count unique stations
+island_station_count <- wco_clean %>%
+  group_by(Island) %>%
+  summarise(Unique_Stations = n_distinct(`Station Name`))
+
+# Print the table
+island_station_count
+
+# Set levels for Islands (West to East)
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Santa Barbara", "Mainland")
+
+# Group by Station and find the longitude and latitude of each
+station_location <- wco_clean %>%
+  group_by(`Station Name`) %>%
+  summarise(Longitude = mean(Longitude, na.rm = TRUE),
+            Latitude = mean(Latitude, na.rm = TRUE))
+
+# Print the full table
+View(station_location)
+
+# Set levels for stations based on longitude (West to East)
+station_order <- station_location %>%
+  arrange(Longitude) %>%
+  pull(`Station Name`)
+
+  # Convert Island and Station Name to factors with specified order
+  wco_clean <- wco_clean %>%
+    mutate(Island = factor(Island, levels = island_order),
+           `Station Name` = factor(`Station Name`, levels = station_order))
+
+```
+
+# Finally we can merge the tag data and write the .csv
+```{r}
+
+# Merge the tag_data into the wco_clean dataset based on the Transmitter column
+wco_merged <- left_join(wco_clean, tag_data, by = "Transmitter")
+
+# Verify the structure of the merged dataset
+str(wco_merged)
+
+# Export the merged dataset to a CSV file
+write_csv(wco_merged, "data/wco_detections+tags_20240613.csv")
+
+```

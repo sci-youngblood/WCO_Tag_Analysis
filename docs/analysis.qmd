@@ -26,10 +26,31 @@ We can start by looking at the number of unique transmitters in the dataset to m
 # load necessary libraries
 ```{r load-libraries, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
 
-library(ggplot2)
+```{r packages, warning=FALSE, message=FALSE}
+#install.packages("fuzzyjoin")
+
+library(readr)
+library(gganimate)
+library(lubridate)
+library(adehabitatHR)
+library(adehabitatHS)
+library(adehabitatLT)
+library(adehabitatMA)
+library(deldir)
 library(dplyr)
-library(tidyr)
-library(knitr)
+library(sp)
+library(ggplot2)
+library(sf)
+library(ggmap)
+library(stats)
+library(viridis)
+library(geosphere)
+library(zoo)
+library(gifski)
+library(fuzzyjoin)
+
+```
+
 
 
 ```
@@ -38,12 +59,12 @@ library(knitr)
 ```{r data-quality-check, echo=TRUE, eval=TRUE}
 
 # Load Sorted Tag ID data
-Tag_Data <- read.csv("data/sorted_Tag_Data.csv")
+Tag_Data <- read.csv("data/Updated_Tag_ID_20240611.csv")
 
 str(Tag_Data)
 
-# Load WCO Reciever with Tag ID data
-WCO <- read.csv("data/WCO_with_Tag_ID_6_6_24.csv")
+# Load WCO Reciever Data
+WCO_reciever <- read.csv("data/wco_detections+tags_20240613.csv")
 
 # count the number of unique transmitters in Tag_Data 
 unique_transmitter_Tag_Data <- Tag_Data %>%
@@ -52,7 +73,7 @@ unique_transmitter_Tag_Data <- Tag_Data %>%
 print(unique_transmitter_Tag_Data)
 
 # count the number of unique transmitters in WCO 
-unique_transmitter_WCO <- WCO %>% 
+unique_transmitter_WCO <- WCO_reciever %>% 
     summarise(unique_count = n_distinct(Transmitter))
 
 print(unique_transmitter_WCO)
@@ -60,7 +81,23 @@ print(unique_transmitter_WCO)
 
 ```
 
-# We see 253 unique transmitters in the Tag Data and 305 unique transmitters in the WCO data. This is fine because the Tag Data is a subset of the WCO data. We can proceed with the analysis.
+# We see 253 unique transmitters in the Tag Data and 302 unique transmitters in the WCO data. This is fine because the Tag Data is a subset of the WCO data. We can proceed with the analysis.
+
+# Filter for transmitters with less than 2 detections
+```{r filter-transmitters, echo=TRUE, eval=TRUE}
+
+# Filter for detections > 1
+WCO <- WCO_reciever %>%
+  group_by(Station.Name, Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# Determine the number of unique transmitters in the filtered dataset
+unique_transmitter_count <- WCO %>%
+  summarise(unique_count = n_distinct(Transmitter))
+
+print(unique_transmitter_count)
+```
 
 # Abacus Plots for Species
 
@@ -259,16 +296,18 @@ ggsave("outputs/Abacus_Plot_Galeorhinus.png", plot = Abacus_Galeorhinus, width =
 Filtered_Carcharodon <- WCO %>%
   filter(SciName == "Carcharodon carcharias")
 
+# Look at the number of unique transmitters for Carcharodon carcharias
+Number_of_Carcharodon <- Filtered_Carcharodon %>%
+  summarise(Transmitter_count = n_distinct(Transmitter))
+
+print(Number_of_Carcharodon)
+
 # Create a vector of custom shapes to represent sex for the species. 
 shapes <- c(1, 3, 2)
 
 # Convert 'Date' from character to Date format in the Filtered_Carcharodon dataframe
 Filtered_Carcharodon <- Filtered_Carcharodon %>%
   mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
-
-# Filter for detections where Island is NA
-Filtered_Carcharodon <- Filtered_Carcharodon %>%
-  filter(!is.na(Island))
 
 # Filter for detections where sex is NA
 Filtered_Carcharodon <- Filtered_Carcharodon %>%
@@ -357,3 +396,72 @@ write.csv(Filtered_Carcharodon_table, "data/Carcharodon_Life_Stage_table.csv", r
 
 ```
 
+# Make a movie for shark A69-9001-13501 
+```{r shark-movie-13501, echo=TRUE, eval=TRUE}
+
+# Filter the data for the specific shark transmitter
+A69_9001_13501 <- Filtered_Carcharodon %>% 
+  filter(Transmitter == "A69-9001-13501")
+
+# Read the shapefiles
+islands <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+
+# Create a Daily column for easier plotting
+detections_per_station_daily_13510 <- A69_9001_13501 %>%
+  mutate(Daily = as.Date(Date)) %>%
+  group_by(Longitude, Latitude, Island, Year = year(Daily), Daily) %>%
+  summarise(Detections = n(), TNL_cm_adjusted = mean(TNL_cm_adjusted)) %>%
+  ungroup()
+
+base_plot_13510 <- ggplot() + 
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = islands, fill = "gray80", color = "black") +  # Plot the shapefile
+  geom_point(data = detections_per_station_daily_13510, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted), size = 5) +
+  scale_color_gradient(low = "yellow", high = "red") +  # Set the color gradient from red to yellow
+  coord_sf(xlim = c(-120.65, -119.25), ylim = c(33.8, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(x = "Longitude", y = "Latitude", color = "Total Length (cm)")
+
+# Create the animation
+animation_plot_13510 <- base_plot_13510 +
+  geom_point(data = detections_per_station_daily_13510, aes(x = Longitude, y = Latitude, color = TNL_cm_adjusted, size = Detections)) +
+  transition_states(states = Daily, transition_length = 2, state_length = 5) +
+  labs(title = paste("Detections per Station:", "{closest_state}"))
+```
+
+### Animate 13510 and save
+```{r, eval=FALSE}
+
+animate(animation_plot_13510, nframes = length(unique(as.vector(detections_per_station_daily_13510$Daily))), fps = 5, width = 800, height = 600, renderer = gifski_renderer("outputs/13510_animation.gif"))
+
+# Set levels for stations based on longitude (West to East)
+station_order <- A69_9001_13501 %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+# Remove duplicated levels
+station_order <- unique(station_order)
+
+# Convert Island and Station Name to factors with specified order
+A69_9001_13501 <- A69_9001_13501 %>%
+  mutate(Station.Name = factor(Station.Name, levels = station_order))
+
+# Create abacus for 13510
+Abacus_13510 <- ggplot(A69_9001_13501, aes(x = factor(`Station.Name`, levels = station_order), y = Date, color = TNL_cm_adjusted)) +
+  geom_point(shape = 19, size = 5) +
+  scale_color_viridis_c(option = "plasma", direction = -1) +
+  labs(title = "Abacus Plot for 13510", x = "Station", y = "Date", color = "TNL") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(Abacus_13510)
+ggsave("outputs/Abacus_Plot_13510.png", plot = Abacus_13510, width = 10, height = 15, dpi = 300, units = "in")
+
+```
