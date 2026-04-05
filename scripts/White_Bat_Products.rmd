@@ -1,0 +1,594 @@
+---
+title: "White Bat Connectivity Animation"
+output: White_Bat_Product Analysis.html
+Author: "Morgan Youngblood"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Now for the final feature of our presentation we will look at the detections per individual per station for each species during each month. 
+
+## To display this, we are going to animate the detections per individual per station (represented as the size of the points) on the map for each month. Each month will be a separate frame in the animation, and each species will have its own animation.
+
+### First we need to organize the data so that we can plot it on the map.
+```{r organize-data, echo=TRUE, eval=TRUE}
+
+# Load WCO Reciever Data
+WCO_reciever <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for detections associated with Carcharodon carcharias
+Carcharias_detections <- WCO_reciever %>%
+  filter(SciName == "Carcharodon carcharias")
+
+```
+
+# Filter for transmitters with less than 2 detections
+```{r filter-transmitters, echo=TRUE, eval=TRUE}
+
+# Filter for detections > 1
+Carcharias_detections <- Carcharias_detections %>%
+  group_by(Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# Determine the number of unique transmitters in the filtered dataset
+unique_transmitter_count <- Carcharias_detections %>%
+  summarise(unique_count = n_distinct(Transmitter))
+
+print(unique_transmitter_count)
+```
+
+# Cleanup Islands
+```{r cleanup-islands, echo=TRUE, eval=TRUE}
+
+library(dplyr)
+
+# Clean up the Island column by removing the columns with .x and .y
+Carcharias_detections <- Carcharias_detections %>%
+  rename(Island = Island.x) %>%
+  select(-contains(".x"), -contains(".y"))
+  
+
+```
+
+# Set Station Order
+```{r station-order, echo = False}
+
+# Set levels for Islands (West to East)
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland", "Santa Barbara")
+
+# Group by Station and find the longitude and latitude of each
+station_location <- Carcharias_detections %>%
+  group_by(Station.Name) %>%
+  summarise(Longitude = mean(Longitude, na.rm = TRUE),
+            Latitude = mean(Latitude, na.rm = TRUE))
+
+print(station_location)
+
+# Write .csv file with station locations
+write.csv(station_location, "outputs/station_location.csv")
+
+# Set levels for stations based on longitude (West to East)
+station_order <- station_location %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+  # Convert Island and Station Name to factors with specified order
+  Carcharias_detections <- Carcharias_detections %>%
+    mutate(Island = factor(Island, levels = island_order),
+           Station.Name = factor(Station.Name, levels = station_order))
+
+```
+
+
+
+# Carcharodon carcharias animation
+
+## Make a summary table to determine the number of unique Transmitters, tag_location, tag_lon, and tag_lat for each. We need to decide how we are going to display the tag location for these transmitters since we are going to display the tag location for each individual on the map and color the groups based on the tag location.
+```{r carcharodon-summary-table, echo=TRUE, eval=TRUE}
+Carcharodon_tag_location <- Carcharias_detections %>%
+    group_by(Transmitter) %>%
+    summarise(tag_location = first(tag_location),
+                        tag_lon = first(tag_lon),
+                        tag_lat = first(tag_lat),
+                        days_detected = n_distinct(Date),
+                        Owner = first(Owner)) %>%
+    filter(!is.na(Owner)) %>%
+    arrange(tag_location)
+
+print(Carcharodon_tag_location)
+
+# Let's write this table to a .csv file
+#write.csv(Carcharodon_tag_location, "outputs/Carcharodon_tag_location.csv")
+```
+# Map tagged locations
+```{r detections-per-individual-animations, echo=TRUE, eval=TRUE}
+
+# Import Carcharodon_tag_location.csv
+Carcharodon_tag_location <- read.csv("outputs/Carcharodon_tag_location.csv")
+
+# name shape files for the map
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+baja <- st_read("data/nyu_2451_36780/bcs_entidad.shp")
+bcali <- st_read("data/nyu_2451_36772/bc_municipio.shp")
+
+library(ggplot2)
+
+# Make a map of the tag locations for Carcharodon carcharias colored on a gradient based on tag_lat
+Carcharodon_tag_Locations_map <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_sf(data = baja, fill = "#B2B2B2", color = "grey40") +
+    geom_sf(data = bcali, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = Carcharodon_tag_location, aes(x = tag_lon, y = tag_lat, color = tag_lat), size = 15) +
+    scale_color_gradient(low = "red", high = "blue", guide = guide_legend(title = "Latitude")) +
+    coord_sf(xlim = c(-123.025, -114.45), ylim = c(38.3, 27.85)) +
+    theme_map() +
+    theme(
+        legend.position = "bottomleft",
+        legend.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 20),
+        legend.text = element_text(size = 20)
+    ) +
+    labs(title = NULL, x = "Longitude", y = "Latitude") +
+    scale_x_continuous(breaks = seq(-120, -114, by = 3)) +
+    scale_y_continuous(breaks = seq(27, 39, by = 3)) +
+    geom_rect(aes(xmin = -120.62, xmax = -119.27, ymin = 33.81, ymax = 34.42), fill = NA, color = "black", size = 2)
+
+
+print(Carcharodon_tag_Locations_map)
+
+# export the map
+ggsave("outputs/Carcharodon_tag_Locations_map.png", width = 15, height = 20, units = "in", dpi = 300)
+
+```
+
+# Now we will animate the detections per month by size of the points with individuals colored by tag_lat. 
+```{r animate-detections-per-individual, echo=TRUE, eval=TRUE}
+
+# Load the necessary libraries
+library(gganimate)
+library(ggplot2)
+
+# Calculate the number of detections per transmitter at each station
+detections_per_individual <- Carcharias_detections %>%
+    group_by(Station.Name, Transmitter) %>%
+    summarise(Detections = n(), .groups = 'drop')
+
+# Calculate average detections per individual, standard error, and sample size for each station
+avg_detections_per_individual_per_station <- detections_per_individual %>%
+    group_by(Station.Name) %>%
+    summarise(
+        avg_detections = mean(Detections),
+        se_detections = sd(Detections) / sqrt(n()),
+        num_transmitters = n_distinct(Transmitter),
+        .groups = 'drop'
+    ) %>%
+    mutate(myaxis = paste0(Station.Name, "\n", "n=", num_transmitters))
+
+# Join the average detections data back to the original Carcharias_detections for plotting
+Carcharias_detections <- Carcharias_detections %>%
+    left_join(avg_detections_per_individual_per_station, by = c("Station.Name" = "Station.Name"))
+
+# Replace the month numbers with the month names
+Carcharias_detections$Month <- factor(Carcharias_detections$Month, levels = 1:12, labels = month.name)
+
+# Filter Detections where tag_lat is NA
+Carcharias_detections <- Carcharias_detections %>%
+    filter(!is.na(tag_lat))
+
+# Adjust the ggplot object for the animation
+Carcharias_animation <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = Carcharias_detections, aes(x = Longitude, y = Latitude, size = avg_detections, color = tag_lat, group = Month)) +
+    scale_color_gradient(low = "red", high = "blue", guide = guide_colorbar(direction = "horizontal", barwidth = 15, barheight = 3, title.position = "top", title = "Tagging Latitude (°N)", label = list(size = 40)), name = "Tagging Latitude (°N)") +
+    scale_size_continuous(name = "Average Detections Per Individual", guide = guide_legend(title.position = "top", title = "Average Detections Per Individual"), range = c(3, 10)) +
+    coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +
+    theme_map() +
+    theme(
+        legend.position = "bottom",
+        legend.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 20),
+        legend.text = element_text(size = 20),
+        plot.title = element_text(face = "bold", size = 30) # Ensure title size is consistent
+    ) +
+    labs(x = "Longitude", y = "Latitude") +
+    scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+    scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4)) +
+    transition_states(Month, transition_length = 1, state_length = 1, wrap = FALSE) +
+    labs(title = '{closest_state}') + # Dynamic title based on the state (Month)
+    shadow_mark(past = FALSE, future = FALSE)
+
+# Animate the plot with adjusted settings for 1-second frames per month
+animate(Carcharias_animation, nframes = 12, duration = 12, width = 800, height = 800, fps = 1)
+
+# Save the animation as a .gif file
+anim_save("outputs/Carcharias_animation.gif", width = 22, height = 15, dpi = 300, units = "in")
+```
+
+# I want to make a static map as an image that shows the total detections per station for Carcarodon carcharias.
+```{r carcharias-detections-per-station, echo=TRUE, eval=TRUE}
+
+# Calculate the total detections per station location in the species data
+detections_per_station <- Carcharias_detections %>%
+    group_by(Station.Name) %>%
+    summarise(Detections = n(), Latitude = mean(Latitude), Longitude = mean(Longitude), .groups = 'drop')
+
+# Make a map of the total detections per station for Carcharodon carcharias
+Carcharias_detections_per_station_map <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = detections_per_station, aes(x = Longitude, y = Latitude, color = Detections, size = Detections), shape = 16) +
+  scale_color_gradient(low = "blue", high = "red", guide = guide_colorbar(title = "Detections", label = list(size = 40), direction = "horizontal", barwidth = 15, barheight = 3, title.position = "top", title.hjust = 0.5, title.vjust = 0.5), name = "Detections") +  # Color gradient with yellow as low and red as high
+  scale_size(range = c(4, 10), guide = "none") +
+    coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +
+    theme_map() +
+    theme(
+        legend.position = "bottom",
+        legend.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 20),
+        legend.text = element_text(size = 20),
+        plot.title = element_text(face = "bold", size = 30)
+    ) +
+    labs(x = "Longitude", y = "Latitude") +
+    scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+    scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4))
+
+print(Carcharias_detections_per_station_map)
+
+# Export the map as a .png file
+ggsave("outputs/Carcharias_detections_per_station_map.png", width = 15, height = 20, units = "in", dpi = 300)
+
+```
+
+# Now I want to make an animation for the bat ray data
+```{r filter-bat-ray-data, echo=TRUE, eval=TRUE}
+
+# Load WCO Reciever Data
+WCO_reciever <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for detections associated with Carcharodon carcharias
+Myliobatis_detections <- WCO_reciever %>%
+  filter(SciName == "Myliobatis californica")
+
+# Filter for detections > 1
+Myliobatis_detections <- Myliobatis_detections %>%
+    group_by(Transmitter) %>%
+    filter(n() > 1) %>%
+    ungroup()
+
+
+  ```
+
+ ```{r bat-detections-station-animation, echo=TRUE, eval=TRUE}
+
+library(dplyr)
+library(ggplot2)
+library(gganimate)
+library(sf) # Assuming spatial data for plotting
+
+# Create a dataset to plot the total detections per month at each station with the myliobatis data
+detections_per_station <- Myliobatis_detections %>%
+    group_by(Station.Name, Month) %>%
+    summarise(Detections = n(), Latitude = mean(Latitude), Longitude = mean(Longitude), .groups = 'drop')
+
+# Replace the month numbers with the month names
+detections_per_station$Month <- factor(detections_per_station$Month, levels = 1:12, labels = month.name)
+
+# Calculate the total detections per station for each month
+total_detections_per_station <- detections_per_station %>%
+    group_by(Month, Station.Name) %>%
+    summarise(Total_Detections = sum(Detections))
+
+# Merge the total detections data back to the detections_per_station dataset
+detections_per_station <- left_join(detections_per_station, total_detections_per_station, by = c("Month", "Station.Name"))
+
+# Make a ggplot object for the animation
+bat_detections_animation <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +  # Check coast data
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +  # Check sanctuary data
+  geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +  # Check islands data
+  geom_point(data = detections_per_station, aes(x = Longitude, y = Latitude, size = Total_Detections, color = Total_Detections), shape = 16) +  # Check detections_per_station data
+  scale_size_continuous(name = "Detections", guide = "none", range = c(3, 10)) +
+  scale_color_gradient(low = "blue", high = "red", guide = guide_colorbar(title = "Detections", label = list(size = 40), direction = "horizontal", barwidth = 15, barheight = 3, title.position = "top", title.hjust = 0.5, title.vjust = 0.5), name = "Detections") +
+  coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +  # Adjust if necessary
+  theme_map() +  # Ensure this is defined or replace with a standard theme
+  theme(
+    plot.title = element_text(face = "bold", size = 30),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 20)
+  ) +
+  labs(x = "Longitude", y = "Latitude") +
+  transition_states(Month, transition_length = 1, state_length = 1, wrap = FALSE) +
+  labs(title = '{closest_state}') + 
+  shadow_mark(past = FALSE, future = FALSE)
+
+# Animate the plot with adjusted settings for 1-second frames per month
+animate(bat_detections_animation, nframes = 12, duration = 12, width = 800, height = 800, fps = 1)
+# Save the animation as a .gif file
+anim_save("outputs/bat_detections_animation.gif", width = 22, height = 15, dpi = 300, units = "in")
+
+ ``` 
+
+ # We're going to look at bat ray detection across a greater area since I have more data for this species. 
+ ```{r bat-data-upload, echo=TRUE, eval=TRUE}
+
+library(dplyr)
+
+# Load RDS file with additional bat ray detections
+bat_lowe <- readRDS("data/morgan_bat_rays.RDS")
+
+# View the structure of the bat ray data
+str(bat_lowe)
+
+# How many unique transmitters are in the bat ray data? I want a list of every unique Transmitter. 
+
+unique_transmitters <- unique(bat_lowe$transmitter)
+unique_transmitters
+
+# Load Sorted Tag ID data
+Tag_Data <- read.csv("outputs/updated_tag_id_20240621.csv")
+
+str(Tag_Data)
+
+# Filter Tag Data for Bat Rays
+Bat_Ray_Tags <- Tag_Data %>%
+  filter(SciName == "Myliobatis californica")
+
+# Merge the bat ray data with the tag data
+bat_lowe <- bat_lowe %>%
+  left_join(Bat_Ray_Tags, by = c("transmitter" = "Transmitter"))
+
+
+# View the structure of the merged bat ray data
+str(bat_lowe)
+
+# How many unique transmitters are in the bat ray data? I want a list of every unique Transmitter.
+unique(bat_lowe$transmitter)
+
+
+ ```
+
+# Load WCO Reciever Data
+ ```{r organize-data, echo=TRUE, eval=TRUE}
+
+# Load WCO Reciever Data
+WCO_reciever <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for detections associated with Myliobatis californica
+Myliobatis_detections <- WCO_reciever %>%
+  filter(SciName == "Myliobatis californica")
+
+```
+
+# Add the bat_low detections to the Myliobatis detections data
+```{r add-bat-low-detections, echo=TRUE, eval=TRUE}
+
+str(bat_lowe)
+str(Myliobatis_detections)
+
+# Export both datasets to .csv files so that I can edit them manually
+#write.csv(bat_lowe, "outputs/bat_lowe.csv")
+#write.csv(Myliobatis_detections, "outputs/Myliobatis_detections.csv")
+
+# Load the edited .csv files
+bat_lowe <- read.csv("outputs/bat_lowe.csv")
+Myliobatis_detections <- read.csv("outputs/Myliobatis_detections.csv")
+
+# Look at the format of the Local_Time columns in both datasets
+str(bat_lowe$Local_Time)
+str(Myliobatis_detections$Local_Time)
+
+# Convert the Local_Time column in bat_lowe to date time format
+bat_lowe$Local_Time <- as.POSIXct(bat_lowe$Local_Time, format = "%Y-%m-%d %H:%M:%S")
+
+# Convert the Local_Time column in Myliobatis_detections to date time format
+Myliobatis_detections$Local_Time <- as.POSIXct(Myliobatis_detections$Local_Time, format = "%Y-%m-%dT%H:%M:%SZ")
+
+# Add the bat_low detections to the Myliobatis detections data
+colnames(bat_lowe) <- colnames(Myliobatis_detections)
+Myliobatis_detections <- rbind(Myliobatis_detections, bat_lowe)
+
+# view the structure of the combined data
+str(Myliobatis_detections)
+
+# Look for NA values in the Local_Time column
+sum(is.na(Myliobatis_detections$Local_Time))
+
+# How many unique transmitters are in the combined data?
+unique(Myliobatis_detections$Transmitter)
+
+
+# How many unique Stations are in the combined data?
+unique(Myliobatis_detections$Station.Name)
+
+# Let's create a table to determine the location of each station
+station_location <- Myliobatis_detections %>%
+  group_by(Station.Name) %>%
+  summarise(Longitude = mean(Longitude, na.rm = TRUE),
+            Latitude = mean(Latitude, na.rm = TRUE))
+
+print(station_location)
+
+# Write the station location data to a .csv file
+write.csv(station_location, "outputs/station_location_south.csv")
+
+```
+
+# Filter for transmitters with less than 2 detections
+```{r filter-transmitters, echo=TRUE, eval=TRUE}
+
+# Filter for detections > 1
+Myliobatis_detections <- Myliobatis_detections %>%
+  group_by(Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+```
+
+# Make a summary table to determine the location of each station
+```{r bat-ray-summary-location, echo=TRUE, eval=TRUE}
+
+# Make a summary table to determine the Lat and Long of each station
+station_location <- Myliobatis_detections %>%
+  group_by(Station.Name) %>%
+  summarise(Longitude = mean(Longitude, na.rm = TRUE),
+            Latitude = mean(Latitude, na.rm = TRUE))
+
+
+print(station_location)
+```
+
+# Let's make a map showing The california Coast with the station locations for Myliobatis californica
+```{r map-station-myliobatis, echo=TRUE, eval=TRUE}
+
+library(ggplot2)
+library(sf)
+library(ggthemes)
+
+# Load the shape files for the map
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+baja <- st_read("data/nyu_2451_36780/bcs_entidad.shp")
+bcali <- st_read("data/nyu_2451_36772/bc_municipio.shp")
+
+# Make a map of the station locations for Myliobatis californica
+Myliobatis_station_map <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_sf(data = baja, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = station_location, aes(x = Longitude, y = Latitude), size = 7, color = "#095558") +
+    coord_sf(xlim = c(-123.025, -117.5), ylim = c(38, 32.5)) +
+    theme_map() +
+    theme(
+        legend.position = "bottomleft",
+        legend.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        panel.grid.major = element_line(color = "black", linetype = "solid", linewidth = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 20),
+        legend.text = element_text(size = 20)
+    ) +
+    labs(title = NULL, x = "Longitude", y = "Latitude") +
+    scale_x_continuous(breaks = seq(-121, -118, by = 3)) +
+    scale_y_continuous(breaks = seq(27, 39, by = 3)) +
+    geom_rect(aes(xmin = -120.62, xmax = -117.75, ymin = 33.1, ymax = 34.5), fill = NA, color = "black", size = 2)
+
+print(Myliobatis_station_map)
+
+# Export the map as a .png file
+ggsave("outputs/Myliobatis_station_map.png", width = 15, height = 20, units = "in", dpi = 300)
+
+```
+
+# Adjust data to look at total detections per month at each station for Myliobatis californica
+```{r total-detections-per-station-myliobatis, echo=TRUE, eval=TRUE}
+
+# Extract the month from the Date and time column
+Myliobatis_detections$Month <- as.numeric(format(Myliobatis_detections$Local_Time, "%m"))
+
+# Evaluate the unique months in the Myliobatis data
+unique(Myliobatis_detections$Month)
+
+# Create a dataset to plot the total detections per month at each station with the myliobatis data
+detections_per_station <- Myliobatis_detections %>%
+  group_by(Station.Name, Month, Transmitter) %>%
+  summarise(Detections = n(), Latitude = mean(Latitude), Longitude = mean(Longitude), .groups = 'drop')
+
+# Replace the month numbers with the month names
+detections_per_station$Month <- factor(detections_per_station$Month, levels = 1:12, labels = month.name)
+
+# Calculate the total detections per station for each month
+total_detections_per_station <- detections_per_station %>%
+  group_by(Month, Station.Name, Transmitter) %>%
+  summarise(Total_Detections = sum(Detections), .groups = 'drop')
+
+# Merge the total detections data back to the detections_per_station dataset
+detections_per_station <- left_join(detections_per_station, total_detections_per_station, by = c("Month", "Station.Name", "Transmitter"), suffix = c("", "_total"))
+
+```
+
+# Ok, Now we're going to animate the detections per individual per station for Myliobatis californica
+```{r animate-detections-per-individual-myliobatis, echo=TRUE, eval=TRUE}
+
+# Count the number of unique transmitters in the Myliobatis data
+unique(Myliobatis_detections$Transmitter)
+
+# Load the necessary libraries
+library(gganimate)
+library(ggplot2)
+
+# Define the color spectrum
+color_spectrum <- colorRampPalette(c("yellow", "orange", "red", "maroon", "purple", "lightblue", "blue", "black"))
+
+# Generate 11 unique colors from the defined spectrum
+colors <- color_spectrum(10)
+
+
+# Adjust the ggplot object for the animation
+Myliobatis_animation <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+  geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+  geom_point(data = detections_per_station, aes(x = Longitude, y = Latitude, size = Total_Detections, color = Transmitter, group = Month), position = position_jitter(width = 0.02, height = 0.02)) +
+  scale_color_manual(values = colors, name = "Rays") +
+  scale_size_continuous(name = "Detections", guide = "none", range = c(3, 15)) +
+  coord_sf(xlim = c(-120.62, -117.75), ylim = c(33.1, 34.5)) +
+  theme_map() +
+  theme(
+    legend.position = "left",
+    legend.title = element_text(size = 25),
+    legend.direction = "vertical",
+    legend.key.width = unit(1, "cm"),
+    legend.key.height = unit(0.5, "cm"),
+    legend.text = element_blank(), # Hide legend text
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+    panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(color = "black", size = 20),
+    plot.title = element_text(face = "bold", size = 30)
+  ) +
+  labs(x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-120.4, -118.8, by = 0.8)) +
+  scale_y_continuous(breaks = seq(33.1, 34.7, by = 0.8)) +
+  transition_states(Month, transition_length = 1, state_length = 1, wrap = FALSE) +
+  labs(title = '{closest_state}') +
+  shadow_mark(past = FALSE, future = FALSE)
+
+# Animate the plot with adjusted settings for 1-second frames per month
+animate(Myliobatis_animation, nframes = 12, duration = 12, width = 800, height = 800, fps = 1)
+
+# Save the animation as a .gif file
+anim_save("outputs/Myliobatis_animation.gif", width = 22, height = 15, dpi = 300, units = "in")
+
+
+```

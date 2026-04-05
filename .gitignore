@@ -1,2 +1,40 @@
-data/og_detection-data_cinms-wco_20231024_01.csv
-data/wco_detections+tags_20240613.csv
+# Large raw data files
+data/*.csv
+data/*.rds
+data/*.RDS
+
+# Shapefiles
+data/**/*.shp
+data/**/*.dbf
+data/**/*.sbn
+data/**/*.sbx
+data/**/*.prj
+data/**/*.cpg
+data/**/*.shx
+
+# macOS noise
+.DS_Store
+**/.DS_Store
+._*
+
+# R artifacts
+.Rhistory
+.RData
+*.Rproj.user
+
+# ArcGIS locks
+**/*.sr.lock
+
+# Bare repo accidentally in working tree
+WCO_Tag_Analysis.git/
+
+# Outputs — collaborator detection extracts
+outputs/*_detections_*.csv
+outputs/*_detection_data_*.csv
+
+# Apple Numbers files
+outputs/*.numbers
+
+# Large collaborator detection exports
+outputs/bat_lowe.csv
+outputs/Myliobatis_detections.csv

@@ -152,9 +152,9 @@ merged_Block_data$SciName[merged_Block_data$SciName == "White Shark"] <- "Carcha
 merged_Block_data <- merged_Block_data %>%
     filter(!is.na(SciName))
 
-    # Remove seriesname and eventid columns from merged_Block_data
+    # Remove eventid columns from merged_Block_data
 merged_Block_data <- merged_Block_data %>%
-    select(-seriesname, -eventid)
+    select(-eventid)
 
 # Load sorted_Tag_Data.csv
 sorted_data <- read_csv("data/sorted_Tag_Data.csv")
@@ -165,6 +165,11 @@ str(sorted_data)
 # Merge the datasets on the Transmitter column
 Tag_ID_6_9 <- sorted_data %>%
   left_join(merged_Block_data, by = "Transmitter")
+
+# Merge seriesname column from Block data with tag_location column from sorted data as a single tag_location column
+Tag_ID_6_9 <- Tag_ID_6_9 %>%
+  mutate(tag_location = if_else(is.na(tag_location), tag_location, seriesname)) %>%
+  select(-seriesname)
 
 # Combine SciName.x and SciName.y into a single SciName column
 Tag_ID_6_9 <- Tag_ID_6_9 %>%
@@ -177,10 +182,12 @@ Tag_ID_6_9 <- Tag_ID_6_9 %>%
   select(-TNL_cm.x, -TNL_cm.y)
 
 # Change when_encountered column to Date format
-Tag_ID_6_9$when_encountered.y <- as.Date(Tag_ID_6_9$when_encountered.y, format = "%m/%d/%Y")
+Tag_ID_6_9$when_encountered.y <- as.Date(Tag_ID_6_9$when_encountered.y, format = "%m-%d-%y")
+# Convert the Date format to year-month-day
+Tag_ID_6_9$when_encountered.y <- format(Tag_ID_6_9$when_encountered.y, "%Y-%m-%d")
 
 Tag_ID_6_9 <- Tag_ID_6_9 %>%
-  mutate(when_encountered = if_else(is.na(when_encountered.y), when_encountered.x, when_encountered.y)) %>%
+  mutate(when_encountered = if_else(is.na(when_encountered.x), as.character(when_encountered.x), as.character(when_encountered.y))) %>%
   select(-when_encountered.x, -when_encountered.y)
 
 Tag_ID_6_9 <- Tag_ID_6_9 %>%
@@ -380,3 +387,122 @@ str(A69_1601_27071)
 write_csv(A69_1601_27071, "outputs/A69_1601_27071_detections_20240611.csv")
 ```
 
+# Send Alyssa data for transmitter A69-1602-12244
+```{r send_12244_data, echo=FALSE}
+
+# Load new detection data
+new_detection_data <- read.csv("data/hollings_detection-data_cinms_wco_20240617.csv")
+
+# Filter for Transmitter A69-1602-12244
+A69_1602_12244 <- new_detection_data %>%
+  filter(Transmitter == "A69-1602-12244")
+
+# view structure of A69_1602_12244
+str(A69_1602_12244)
+
+# Write filtered data to a .csv file
+write_csv(A69_1602_12244, "outputs/A69_1602_12244_detections_20240617.csv")
+```
+
+# Send Sal Jorgensen's data 
+```{r send_Sal_data, echo=FALSE}
+
+# Load updated detection data
+updated_detection_data <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for Owner Salvador Jorgensen
+Salvador_Jorgensen <- updated_detection_data %>%
+  filter(Owner == "Salvador Jorgensen")
+
+# view structure of Salvador_Jorgensen
+str(Salvador_Jorgensen)
+
+# Clean Data
+Salvador_Jorgensen <- Salvador_Jorgensen %>%
+  dplyr::select(Date.and.Time..UTC., Receiver, Transmitter, Transmitter.Name, Transmitter.Serial, Sensor.Value, Sensor.Unit, Station.Name, Latitude, Longitude, Local_Time)
+
+# Identify unique transmitters
+unique_transmitters <- unique(Salvador_Jorgensen$Transmitter)
+
+unique_transmitters
+
+# Write filtered data to a .csv file
+write_csv(Salvador_Jorgensen, "outputs/Salvador_Jorgensen_CINMS_detections_20240618.csv")
+
+```
+
+# Send Noah Ben-Aderet's data
+```{r send_Noah_data, echo=FALSE}
+
+# Load updated detection data
+updated_detection_data <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for Owner Noah Ben-Aderet
+Noah_Ben_Aderet <- updated_detection_data %>%
+  filter(Owner == "Noah Ben-Aderet")
+
+# view structure of Noah_Ben_Aderet
+str(Noah_Ben_Aderet)
+
+# Clean Data
+Noah_Ben_Aderet <- Noah_Ben_Aderet %>%
+  dplyr::select(Date.and.Time..UTC., Receiver, Transmitter, Transmitter.Name, Transmitter.Serial, Sensor.Value, Sensor.Unit, Station.Name, Latitude, Longitude, Local_Time)
+
+# Identify unique transmitters
+unique_transmitters <- unique(Noah_Ben_Aderet$Transmitter)
+
+unique_transmitters
+
+# Write filtered data to a .csv file
+write_csv(Noah_Ben_Aderet, "outputs/Noah_Ben_Aderet_CINMS_detections_20240618.csv")
+
+```
+
+# Send Andy Nosal's data
+```{r send_Andy_data, echo=FALSE}
+
+# Load updated detection data
+updated_detection_data <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for Owner Andy Nosal
+Andy_Nosal <- updated_detection_data %>%
+  filter(Owner == "Andrew Nosal")
+
+# view structure of Andy_Nosal
+str(Andy_Nosal)
+
+# Clean Data
+Andy_Nosal <- Andy_Nosal %>%
+  dplyr::select(Date.and.Time..UTC., Receiver, Transmitter, Transmitter.Name, Transmitter.Serial, Sensor.Value, Sensor.Unit, Station.Name, Latitude, Longitude, Local_Time)
+
+# Identify unique transmitters
+unique_transmitters <- unique(Andy_Nosal$Transmitter)
+
+unique_transmitters
+
+# Write filtered data to a .csv file
+write_csv(Andy_Nosal, "outputs/Andy_Nosal_CINMS_detections_20240618.csv")
+
+```
+
+# Send Block data for tag ID A69-9001-64475 and A69-1303-33545
+```{r send_Block_data, echo=FALSE}
+
+# Load updated detection data
+updated_detection_data <- read.csv("data/wco_detections+tags_20240618.csv")
+
+# Filter for Transmitter A69-9001-64475 and A69-1303-33545
+Mike_detection_data_64475_33545 <- updated_detection_data %>%
+  filter(Transmitter %in% c("A69-9001-64475", "A69-1303-33545"))
+
+  # Clean Data
+Mike_detection_data_64475_33545 <- Mike_detection_data_64475_33545 %>%
+  dplyr::select(Date.and.Time..UTC., Receiver, Transmitter, Transmitter.Name, Transmitter.Serial, Sensor.Value, Sensor.Unit, Station.Name, Latitude, Longitude, Local_Time)
+
+
+# View Mike_detection_data_64475_33545
+View(Mike_detection_data_64475_33545)
+
+# Write filtered data to a .csv file
+write_csv(Mike_detection_data_64475_33545, "outputs/Mike_detection_data_64475_33545_20240618.csv")
+```

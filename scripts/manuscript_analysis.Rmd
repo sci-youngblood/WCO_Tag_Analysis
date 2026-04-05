@@ -1,0 +1,730 @@
+---
+title: "Manuscript Analysis"
+author: "Morgan Youngblood"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Notes
+
+- Cleaned data is located at: `data/wco_detections+tags_20241226.csv`
+- Updated tag ID data is located at: `data/updated_tag_id_20240621.csv`
+
+# Load Libraries
+```{r}
+# install.packages("sf")
+# install.packages("geosphere")
+library(dplyr)
+library(readr)
+library(tidyr)
+library(sf)
+library(ggplot2)
+library(ggthemes)
+library(geosphere)
+```
+
+# Read in the WCO data
+```{r}
+tag_data <- read_csv("data/updated_tag_id_20241226.csv")
+str(tag_data)
+
+detection_data <- read_csv("data/wco_detections+tags_20241226.csv")
+str(detection_data)
+problems(detection_data)
+head(detection_data)
+```
+
+# Let's look at some summary statistics for the detection data. I want to know the time span of the data and total number of detections. 
+```{r}
+# Calculate the time span of the data
+time_span <- range(detection_data$`Date and Time (UTC)`, na.rm = TRUE)
+time_span
+
+# Calculate the total number of detections
+total_detections <- nrow(detection_data)
+total_detections
+
+# How many unique transmitters are there?
+unique_transmitters <- n_distinct(detection_data$Transmitter)
+unique_transmitters
+
+# How many unique transmittrs have an Owner listed?
+unique_transmitters_with_owner <- detection_data %>%
+  filter(!is.na(Owner)) %>%
+  summarise(n_distinct(Transmitter)) %>%
+  pull()
+unique_transmitters_with_owner
+```
+
+# Let's make sure there aren't any duplicate rows in the detection data
+```{r}
+# Check for duplicate rows
+detection_data %>%
+    distinct() %>%
+    nrow()
+
+# How many total rows are there?
+nrow(detection_data)
+```
+
+
+# Figure 1.1: Map of station locations
+```{r}
+# make a table of unique station locations with Station Name, Latitude, and Longitude columns
+station_locations <- detection_data %>%
+  select(`Station Name`, Latitude, Longitude, Island) %>%
+  distinct()
+
+# Remove stations with Island = Santa Barbara
+station_locations <- station_locations %>%
+  filter(Island != "Santa Barbara")
+
+View(station_locations)
+
+# Make a locator map of site_locations
+
+# name shape files for the map
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+baja <- st_read("data/nyu_2451_36780/bcs_entidad.shp")
+bcali <- st_read("data/nyu_2451_36772/bc_municipio.shp")
+
+# Make a map of the station locations for reciever sites
+wco_locator <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_sf(data = baja, fill = "#B2B2B2", color = "grey40") +
+    geom_sf(data = bcali, fill = "#B2B2B2", color = "grey40") +
+    coord_sf(xlim = c(-123.025, -114.45), ylim = c(38.3, 27.85)) +
+    theme_map() +
+    theme(
+        legend.position = "bottomleft",
+        legend.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 20),
+        legend.text = element_text(size = 20)
+    ) +
+    labs(title = NULL, x = "Longitude", y = "Latitude") +
+    scale_x_continuous(breaks = seq(-120, -114, by = 3)) +
+    scale_y_continuous(breaks = seq(27, 39, by = 3)) +
+    geom_rect(aes(xmin = -120.6, xmax = -119.3, ymin = 33.75, ymax = 34.5), fill = NA, color = "black", size = 2)
+
+
+print(wco_locator)
+
+# export the map
+ggsave("outputs/wco_locator.png", width = 15, height = 20, units = "in", dpi = 300)
+
+# make a map of the site locations
+
+# What is the range of lat and lon?
+lat_range <- range(station_locations$Latitude, na.rm = TRUE)
+lon_range <- range(station_locations$Longitude, na.rm = TRUE)
+
+lat_range
+lon_range
+
+# Adjust the ggplot object 
+station_locations_map <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = station_locations, aes(x = Longitude, y = Latitude), color = "black", size = 10) + # Increased size
+    coord_sf(xlim = c(-120.6, -119.3), ylim = c(33.75, 34.5)) +
+    theme_map() +
+    theme(
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 30, face = "bold"), # Increased size and bold
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 30, face = "bold"), # Increased size and bold
+        legend.text = element_text(size = 24)
+    ) +
+    scale_y_continuous(breaks = c(33.8, 34.2, 34.6)) + # Custom y-axis breaks
+    scale_x_continuous(breaks = c(-120.4, -120.0, -119.6)) +
+    labs(x = "Longitude", y = "Latitude")
+
+print(station_locations_map)
+
+# Export the map
+ggsave("outputs/station_locations_map.png", width = 20, height = 15, units = "in", dpi = 300)
+
+
+```
+
+# Figure 2.1: Map with total detections per station
+## I took this from previous work and modified it to fit the Manuscript
+```{r}
+# Calculate total detections per station
+total_detections_per_station <- detection_data %>%
+    group_by(`Station Name`, Latitude, Longitude) %>%
+    summarise(Total_Detections = n(), .groups = "drop")
+
+# Adjust the ggplot object
+detections_map <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = total_detections_per_station, aes(x = Longitude, y = Latitude, size = Total_Detections, color = Total_Detections)) +
+    scale_color_gradient(low = "blue", high = "red") +
+    scale_size_continuous(range = c(3, 10)) +  # Adjust the range to make points bigger
+    coord_sf(xlim = c(-120.6, -119.3), ylim = c(33.75, 34.5)) +
+    theme_map() +
+    theme(
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 30, face = "bold"),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 30, face = "bold"),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 30, face = "bold")  # Make legend title bold and larger
+    ) +
+    scale_y_continuous(breaks = c(33.8, 34.2, 34.6)) +
+    scale_x_continuous(breaks = c(-120.4, -120.0, -119.6)) +
+    labs(x = "Longitude", y = "Latitude", color = "Detections") +
+    guides(size = "none") +
+    geom_vline(xintercept = -119.8, linetype = "dashed", color = "black", size = 1)
+
+print(detections_map)
+
+# Export the map
+ggsave("outputs/fig_2.1_detections_map.png", width = 20, height = 15, units = "in", dpi = 300)
+```
+
+## Let's look at some stats associated with figure 2.2. I want to know the total number of detections at each island, which station has the most detections, and if there were more detections at eastern or western stations.
+```{r}
+# Filter out detections associated with Island = Santa Barbara
+detection_data <- detection_data %>%
+    filter(Island != "Santa Barbara")
+
+# Count the total number of detections at each island
+detections_per_island <- detection_data %>%
+    group_by(Island) %>%
+    summarise(Total_Detections = n())
+
+    # count the percentage of detections at each island
+detections_per_island <- detection_data %>%
+    group_by(Island) %>%
+    summarise(Total_Detections = n()) %>%
+    mutate(Percentage = Total_Detections / sum(Total_Detections) * 100)
+
+
+# List the stations in order of total detections
+stations_by_detections <- detection_data %>%
+    group_by(`Station Name`) %>%
+    summarise(Total_Detections = n()) %>%
+    arrange(desc(Total_Detections))
+
+# Print the list of stations
+stations_by_detections
+
+# Count the number of detections at eastern and western stations
+east_west_detections <- detection_data %>%
+    mutate(East_West = ifelse(Longitude < -119.8, "West", "East")) %>%
+    group_by(East_West) %>%
+    summarise(Total_Detections = n())
+
+# Print the results
+detections_per_island
+most_detections_station
+east_west_detections
+```
+
+# Figure 2.2: Detections per species
+```{r}
+
+# We need to make a bar plot of the number of detections per species I want to use common names for the species (White Shark = carcharodon carcharias, Soupfin Shark = galeorhinus galeus, Bat Ray = myliobatis californica, Leopard Shark = triakis semifasciata, Yellowtail = seriola lalandi, Giant Sea Bass = stereolepis gigas, Sevengill Shark = notorynchus cepedianus)
+# Create a bar plot of the number of detections per species using common names
+species_common_names <- c(
+    "Carcharodon carcharias" = "White Shark",
+    "Galeorhinus galeus" = "Soupfin Shark",
+    "Myliobatis californica" = "Bat Ray",
+    "Triakis semifasciata" = "Leopard Shark",
+    "Seriola lalandi" = "Yellowtail",
+    "Stereolepis gigas" = "Giant Sea Bass",
+    "Notorynchus cepedianus" = "Sevengill Shark"
+)
+
+# Add common names to detection_data
+detection_data <- detection_data %>%
+    mutate(CommonName = species_common_names[SciName]) %>%
+    filter(!is.na(CommonName))  # Exclude NA species
+
+# Count the number of detections per species
+detections_per_species <- detection_data %>%
+    group_by(CommonName) %>%
+    summarise(Detections = n())
+
+# Create the bar plot
+ggplot(detections_per_species, aes(x = reorder(CommonName, -Detections), y = Detections)) +
+    geom_bar(stat = "identity", fill = "#095558") +
+    theme_classic() +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(title = NULL, x = "Species", y = "Detections") +
+    theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 40),
+        axis.text.y = element_text(size = 40),
+        axis.title.x = element_text(size = 45),
+        axis.title.y = element_text(size = 45)
+    )
+
+# Export the plot
+ggsave("outputs/fig_2.2_detections.png", width = 20, height = 15, units = "in", dpi = 300)
+
+```
+
+# lets look at some statistics associated with figure 2.2. I want to know the total number of detections for each species, the average number of detections per day for each species, and the percent of detections each species represents.
+```{r}
+# Calculate the number of unique transmitters for each species
+transmitter_counts <- detection_data %>%
+    group_by(CommonName) %>%
+    summarise(Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+transmitter_counts
+# Calculate the total number of detections for each species
+total_detections_per_species <- detection_data %>%
+    group_by(CommonName) %>%
+    summarise(Total_Detections = n())
+
+# Calculate the average number of detections per day for each species
+average_detections_per_day <- detection_data %>%
+    group_by(CommonName) %>%
+    summarise(Avg_Detections_Per_Day = n() / as.numeric(difftime(max(`Date and Time (UTC)`), min(`Date and Time (UTC)`), units = "days")))
+
+# Calculate the percentage of detections each species represents
+percent_detections_per_species <- detection_data %>%
+  group_by(CommonName) %>%
+  summarise(Percentage = n() / nrow(detection_data) * 100)
+
+# Print the results
+total_detections_per_species
+average_detections_per_day
+percent_detections_per_species
+```
+
+# Table 1 from tag ID data: Species names, nuumber if transmitters, tag owners, average size (plus or minus standard error)
+```{r}
+
+head(tag_data)
+str(tag_data)
+
+# list the unique species
+unique(tag_data$SciName)
+
+# Count the number of unique transmitters for each species
+transmitter_counts <- tag_data %>%
+  group_by(SciName) %>%
+  summarise(Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+transmitter_counts
+
+# Ok, now let's find the tag owners starting with Carcharodon carcharias along with the average size plus or minus the standard error for each tag owner
+carcharodon_table <- tag_data %>%
+    filter(SciName == "Carcharodon carcharias") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+carcharodon_table
+
+# Ok, now let's find the tag owners for Galeorhinus galeus along with the average size plus or minus the standard error for each tag owner
+galeorhinus_table <- tag_data %>%
+    filter(SciName == "Galeorhinus galeus") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+galeorhinus_table
+
+# Ok, now let's find the tag owners for Myliobatis californica along with the average size plus or minus the standard error for each tag owner
+myliobatis_table <- tag_data %>%
+    filter(SciName == "Myliobatis californica") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(disk_length, na.rm = TRUE),
+                        SE_Size = sd(disk_length, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+myliobatis_table
+
+# Ok, now let's find the tag owners for Triakis semifasciata along with the average size plus or minus the standard error for each tag owner
+triakis_table <- tag_data %>%
+    filter(SciName == "Triakis semifasciata") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+triakis_table
+
+# Ok, now let's find the tag owners for Seriola lalandi along with the average size plus or minus the standard error for each tag owner
+seriola_table <- tag_data %>%
+    filter(SciName == "Seriola lalandi") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+seriola_table
+
+# Ok, now let's find the tag owners for Stereolepis gigas along with the average size plus or minus the standard error for each tag owner
+stereolepis_table <- tag_data %>%
+    filter(SciName == "Stereolepis gigas") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+stereolepis_table
+
+# Ok, now let's find the tag owners for Notorynchus cepedianus
+notorynchus_table <- tag_data %>%
+    filter(SciName == "Notorynchus cepedianus") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Size = mean(TNL_cm, na.rm = TRUE),
+                        SE_Size = sd(TNL_cm, na.rm = TRUE) / sqrt(n()),
+                        Transmitter_Count = n_distinct(Transmitter))
+
+# Print the table
+notorynchus_table
+```
+
+## Let's look at some statistics associated with table 1. I want to know the percentages of male and female for each species, and average tag latitude for white sharks associated with each owner.
+```{r}
+# Calculate percentage of male and female for each species
+# Calculate percentage of male and female for each species
+sex_percentage <- tag_data %>%
+    group_by(SciName, sex) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(SciName) %>%
+    mutate(Percentage = Count / sum(Count) * 100)
+
+# Print the table
+sex_percentage
+
+# Calculate average tag latitude for white sharks associated with each owner
+white_shark_latitude <- tag_data %>%
+    filter(SciName == "Carcharodon carcharias") %>%
+    group_by(Owner) %>%
+    summarise(Avg_Latitude = mean(tag_lat, na.rm = TRUE))
+
+# Print the table
+white_shark_latitude
+```
+# Table 2: Species name, maximum days at liberty, maximum detection span, maximum daily displacement, mean Residency Index (plus or minus standard error)
+## Maximum Days at liberty is the maximum number of days between the when_encountered and last detection of a transmitter for the species
+## Maximum Detection Span is the maximum number of days between the first and last detection of a transmitter for the species
+## Maximum Daily Displacement is the maximum straight line distance between detection locations on any given day for the species
+## Mean Residency Index is a metric that's calculated for each individual transmitter as the number of days it was detected at a particular station divided by the total number of days it was detected. 
+### Mean Residency Index is then averaged across all transmitters for the species
+```{r}
+
+# Exclude detections associated with Island = Santa Barbara
+detection_data_filtered <- detection_data %>%
+    filter(Island != "Santa Barbara")
+
+# Calculate the maximum days at liberty for each species
+max_days_at_liberty <- detection_data_filtered %>%
+    group_by(SciName, Transmitter) %>%
+    summarise(Days_at_liberty = max(as.numeric(difftime(Last_Detection, when_encountered, units = "days"))))
+    max_days_at_liberty <- detection_data_filtered %>%
+        group_by(SciName) %>%
+        summarise(Max_Days_at_Liberty = max(as.numeric(difftime(Last_Detection, when_encountered, units = "days")), na.rm = TRUE))
+
+# Calculate the maximum detection span for each species (maximum number of days between the first and last detection of a transmitter for each species)
+max_detection_span <- detection_data_filtered %>%
+    group_by(SciName, Transmitter) %>%
+    summarise(Detection_Span = max(as.numeric(difftime(Last_Detection, First_Detection), units = "days")))
+    max_detection_span <- detection_data_filtered %>%
+        group_by(SciName) %>%
+        summarise(Max_Detection_Span = max(as.numeric(difftime(Last_Detection, First_Detection), units = "days")), na.rm = TRUE)
+
+# Calculate the maximum daily displacement for each species. We have to calculate the distance between each detection location on any given day and take the maximum value for each transmitter then find the transmitter with the maximum value for each species. 
+##To do this we will use the Date and Time columns to distinguish days and Latitude and Longitude columns to calculate the distance between each detection location on any given day.
+## We will use the geosphere package to calculate the distance between each detection location on any given day.
+# Calculate the maximum daily displacement for each species and transmitter
+
+max_daily_displacement <- detection_data_filtered %>%
+  # Group data by Transmitter and Date
+  group_by(SciName, Transmitter, Date) %>%
+  # Arrange detections by Date and Time
+  arrange(`Date and Time (UTC)`) %>%
+  # Compute the pairwise distances for sequential detections on the same day
+  mutate(Distance = ifelse(is.na(lag(Longitude)), 0,
+                           distHaversine(cbind(Longitude, Latitude), 
+                                         lag(cbind(Longitude, Latitude))))) %>%
+  # Aggregate maximum displacement per day
+  summarise(Max_Displacement_Daily = max(Distance, na.rm = TRUE) / 1000,  # Convert meters to kilometers
+            .groups = "drop") %>%
+  # Replace any -Inf values with 0 for Max_Displacement_Daily
+  mutate(Max_Displacement_Daily = ifelse(Max_Displacement_Daily == -Inf, 0, Max_Displacement_Daily)) %>%
+  # Find the maximum daily displacement for each transmitter
+  group_by(SciName, Transmitter) %>%
+  summarise(Max_Daily_Displacement = max(Max_Displacement_Daily, na.rm = TRUE), 
+            .groups = "drop") %>%
+  # Replace any -Inf values with 0 for Max_Daily_Displacement
+  mutate(Max_Daily_Displacement = ifelse(Max_Daily_Displacement == -Inf, 0, Max_Daily_Displacement)) %>%
+  # Find the maximum daily displacement across all transmitters for each species
+  group_by(SciName) %>%
+  summarise(Max_Daily_Displacement = max(Max_Daily_Displacement, na.rm = TRUE))
+
+# View the result
+print(max_daily_displacement)
+
+# Print the table
+max_days_at_liberty
+max_detection_span
+```
+
+# I want to look at the distribution of the Residency Index for each species
+```{r}
+
+# Calculate the mean Residency Index for each species
+## To do this we need to calculate the number of days each transmitter was detected at a particular station and divide it by the total number of days it was detected.
+## We will then average this value across all transmitters for each species.
+
+# Step 1: Calculate the Residency Index (RI) for each detection
+ri_data <- detection_data_filtered %>%
+  # Group by species, transmitter, and station name
+  group_by(SciName, Transmitter, `Station Name`) %>%
+  # Count the number of unique days detected at each station
+  summarise(Days_Detected_At_Station = n_distinct(Date), .groups = "drop") %>%
+  
+  # Step 2: Calculate the total days detected across all stations for each transmitter
+  group_by(SciName, Transmitter) %>%
+  mutate(Total_Days_Detected = sum(Days_Detected_At_Station)) %>%
+  
+  # Step 3: Calculate the Residency Index (RI) for each detection
+  mutate(RI = Days_Detected_At_Station / Total_Days_Detected) %>%
+  
+  # Remove groupings for clean plotting
+  ungroup()
+
+# View the result
+print(ri_data)
+
+# Step 4: Calculate the mean RI for each species for reference in the plot
+species_means <- ri_data %>%
+    group_by(SciName) %>%
+    summarise(
+        mean_RI = mean(RI, na.rm = TRUE),
+        se_RI = sd(RI, na.rm = TRUE) / sqrt(n())
+    )
+
+# Print a table with species means and SE for the Residency Index
+print(species_means)
+
+# name shape files for the map
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+baja <- st_read("data/nyu_2451_36780/bcs_entidad.shp")
+bcali <- st_read("data/nyu_2451_36772/bc_municipio.shp")
+
+# Define the mapping of scientific names to common names
+species_common_names <- c(
+  "Triakis semifasciata" = "Leopard Shark",
+  "Carcharodon carcharias" = "White Shark",
+  "Seriola lalandi" = "Yellowtail",
+  "Myliobatis californica" = "Bat Ray",
+  "Galeorhinus galeus" = "Soupfin Shark",
+  "Notorynchus cepedianus" = "Sevengill Shark",
+  "Stereolepis gigas" = "Giant Sea Bass"
+)
+
+# Add common names to ri_data and remove NA species
+ri_data <- ri_data %>%
+    mutate(CommonName = factor(species_common_names[SciName], 
+                                                         levels = c("Leopard Shark", "White Shark", "Yellowtail", 
+                                                                                "Bat Ray", "Soupfin Shark", "Sevengill Shark", 
+                                                                                "Giant Sea Bass"))) %>%
+    filter(!is.na(CommonName))
+
+# Update species_means with common names and remove NA species
+species_means <- species_means %>%
+    mutate(CommonName = factor(species_common_names[SciName], 
+                                                         levels = c("Leopard Shark", "White Shark", "Yellowtail", 
+                                                                                "Bat Ray", "Soupfin Shark", "Sevengill Shark", 
+                                                                                "Giant Sea Bass"))) %>%
+    filter(!is.na(CommonName))
+
+# Step 5: Create the plot
+ggplot(ri_data, aes(x = RI)) +
+        geom_histogram(
+                fill = "#084d2a", bins = 30
+        ) +  # Adjust bins for better resolution
+        facet_wrap(~CommonName, scales = "free_y") +
+        scale_y_continuous(expand = c(0, 0)) +  # Ensure y-axis starts at the corner
+        scale_x_continuous(expand = c(0, 0)) +  # Ensure x-axis starts at the corner
+        geom_vline(
+                data = species_means, aes(xintercept = mean_RI), color = "red",
+                linetype = "solid", size = 1
+        ) +  # Add mean line for each species
+        geom_vline(
+                data = ri_data %>% group_by(CommonName) %>% summarise(median_RI = median(RI, na.rm = TRUE)),
+                aes(xintercept = median_RI), color = "blue", linetype = "solid", size = 1
+        ) +  # Add median line for each species
+        labs(
+                title = NULL,
+                x = NULL,
+                y = NULL
+        ) +
+        theme_classic() +
+        theme(
+                axis.text.x = element_text(angle = 45, hjust = 1, size = 30),
+                axis.text.y = element_text(color = "black", size = 30),
+                legend.text = element_text(size = 24),
+                legend.title = element_text(size = 30, face = "bold", margin = margin(b = 10)),
+                legend.key.size = unit(1.0, "cm"),
+                strip.text = element_text(size = 35, face = "bold")
+        )
+
+# export the plot
+ggsave("outputs/ri_distribution_plot.png", width = 20, height = 15, units = "in", dpi = 300)
+
+# Step 0: Ensure necessary columns are included in detection_data_filtered
+# Resolve many-to-many relationship by ensuring unique rows in detection_data
+detection_data_filtered <- detection_data_filtered %>%
+  left_join(
+    detection_data %>%
+      select(`Station Name`, Date, Latitude, Longitude) %>%
+      distinct(`Station Name`, Date, Latitude, Longitude),  # Ensure unique rows
+    by = c("Station Name", "Date")  # Join on both Station Name and Date
+  )
+
+# Step 1: Calculate the Residency Index (RI) for each detection
+ri_data <- detection_data_filtered %>%
+  # Group by species, transmitter, and station name
+  group_by(SciName, Transmitter, `Station Name`) %>%
+  # Count the number of unique days detected at each station
+  summarise(Days_Detected_At_Station = n_distinct(Date), .groups = "drop") %>%
+  
+  # Step 2: Calculate the total days detected across all stations for each transmitter
+  group_by(SciName, Transmitter) %>%
+  mutate(Total_Days_Detected = sum(Days_Detected_At_Station)) %>%
+  
+  # Step 3: Calculate the Residency Index (RI) for each detection
+  mutate(RI = Days_Detected_At_Station / Total_Days_Detected) %>%
+  
+  # Remove groupings for clean plotting
+  ungroup()
+
+# Step 2: Calculate the mean RI at each station for each species
+ri_station_data <- ri_data %>%
+  group_by(SciName, `Station Name`) %>%
+  summarise(
+    Mean_RI = mean(RI, na.rm = TRUE),
+    Latitude = first(Latitude),  # Ensure Latitude is included
+    Longitude = first(Longitude),  # Ensure Longitude is included
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(SciName)) %>%
+  mutate(
+    Common_Name = factor(
+      species_common_names[SciName],
+      levels = names(species_common_names)
+    )
+  )
+
+# Step 3: Create the faceted map plot
+ri_station_plot <- ggplot() +
+    geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+    geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+    geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+    geom_point(data = ri_station_data, aes(x = Longitude, y = Latitude, size = Mean_RI, color = Mean_RI)) +
+    scale_color_gradient(low = "blue", high = "red") +
+    scale_size_continuous(range = c(3, 10)) +
+    coord_sf(xlim = c(-120.6, -119.3), ylim = c(33.75, 34.5)) +
+    theme_map() +
+    theme(
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 30, face = "bold"),
+        panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(color = "black", size = 30, face = "bold"),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 30, face = "bold", margin = margin(b = 10)),
+        legend.key.size = unit(1.0, "cm"),
+        strip.text = element_text(size = 35, face = "bold"),
+        legend.position = c(0.8, 0.001)
+    ) +
+    scale_y_continuous(breaks = c(33.8, 34.2, 34.6)) +
+    scale_x_continuous(breaks = c(-120.4, -120.0, -119.6)) +
+    labs(x = "Longitude", y = "Latitude", color = "Mean RI") +
+    guides(size = "none") +
+    facet_wrap(~ Common_Name)
+
+# Step 4: Print the plot
+print(ri_station_plot)
+
+# Export the plot
+ggsave("outputs/ri_station_plot.png", width = 20, height = 15, units = "in", dpi = 300)
+
+```
+
+## I want to see mean RI (plus or minus standard error) for each Island. 
+```{r}
+# Add Island data to ri_data
+ri_data <- ri_data %>%
+    left_join(detection_data_filtered %>% select(`Station Name`, Island) %>% distinct(), by = "Station Name")
+
+# Calculate the mean Residency Index for each Island
+ri_island_data <- ri_data %>%
+    group_by(Island) %>%
+    summarise(mean_RI = mean(RI, na.rm = TRUE),
+              se_RI = sd(RI, na.rm = TRUE) / sqrt(n()))
+
+# Print the table
+print(ri_island_data)
+
+```
+
+## I want to look at some statistics associated with each species. Specifically, I want to look for groups of spcies with similar residency characteristics. 
+### To do this I'll perform non parametric tests among species to determine if there are significant differences in the Residency Index among species.
+```{r}
+# Perform non-parametric tests among species to determine if there are significant differences in the Residency Index among species
+# Perform Kruskal-Wallis test to compare Residency Index among species
+kruskal_test <- kruskal.test(RI ~ SciName, data = ri_data)
+
+# Print the results of the Kruskal-Wallis test
+print(kruskal_test)
+
+# If the Kruskal-Wallis test is significant, perform pairwise comparisons using Dunn's test
+if (kruskal_test$p.value < 0.05) {
+    if (!requireNamespace("FSA", quietly = TRUE)) {
+        install.packages("FSA")
+    }
+    library(FSA)
+    dunn_test <- dunnTest(RI ~ SciName, data = ri_data, method = "bonferroni")
+    print(dunn_test)
+    
+    # Extract the results and assign letters to groups
+    dunn_results <- dunn_test$res
+    dunn_results$SciName <- rownames(dunn_results)
+    dunn_results <- dunn_results %>%
+        mutate(Group = cut(P.adj, breaks = c(-Inf, 0.05, Inf), labels = c("A", "B")))
+    
+    print(dunn_results)
+}
+```
+
+
+

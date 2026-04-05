@@ -1,0 +1,307 @@
+---
+title: "Update_Tag_ID"
+author: "Morgan Youngblood"
+date: "6/21/2024"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load necessary libraries
+```{r}
+
+# Load libraries
+library(dplyr)
+library(readr) 
+library(readxl)
+```
+
+# Let's update the tag ID list for the updated data set
+
+## Load updated detection data
+```{r load}
+
+detection_data <- read_csv("data/hollings_detection-data_cinms_wco_20240617.csv")
+str(detection_data)
+
+```
+
+## Set up time columns
+```{r time}
+# Convert Date and Time (UTC) to local timezone
+detection_data$Local_Time <- as.POSIXct(detection_data$`Date and Time (UTC)`, tz = "America/Los_Angeles")
+
+# Extract date component
+detection_data$Date <- as.Date(detection_data$Local_Time)
+
+# Extract month and year from Date
+detection_data$Month <- format(detection_data$Date, "%m")
+detection_data$Year <- format(detection_data$Date, "%Y")
+detection_data$Hour <- format(detection_data$Local_Time, "%H")
+
+# Define seasons based on the month
+detection_data$Season <- with(detection_data, ifelse(Month %in% c("03", "04", "05"), "Spring",
+                        ifelse(Month %in% c("06", "07", "08"), "Summer",
+                        ifelse(Month %in% c("09", "10", "11"), "Fall",
+                        "Winter"))))
+
+head(detection_data)
+
+colnames(detection_data)
+
+# Evaluate summary statistics for the new columns
+summary(detection_data$Local_Time)
+summary(detection_data$Date)
+summary(detection_data$Month)
+summary(detection_data$Year)
+summary(detection_data$Hour)
+
+```
+
+### Filter Spurious detections using the date
+```{r filter}
+
+# Filter detections where there are < 2 detections per day
+detection_data_clean <- detection_data %>%
+  group_by(Date) %>%
+  filter(n() > 1)
+
+# Filter for detections > 1
+detection_data_clean <- detection_data_clean %>%
+  group_by(Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# Evaluate the number of unique transmitter IDs filtered out
+unique(detection_data$`Transmitter`) %>% length()
+unique(detection_data_clean$`Transmitter`) %>% length()
+
+```
+
+## Make Tag ID list from detection data
+```{r setup-Tag-ID}
+
+# Create a list of unique transmitter IDs with # of days detected, first detection and last detection
+tag_id_list <- detection_data_clean %>%
+    group_by(Transmitter) %>%
+    summarise(
+        Days_Detected = n_distinct(Date),
+        First_Detection = min(Date),
+        Last_Detection = max(Date)
+    ) %>%
+    arrange(desc(Days_Detected))
+
+# View the structure of the tag ID list
+str(tag_id_list)
+
+```
+
+# Merge Lowe Lab Tag ID list with the updated detection data
+```{r Lowe, echo=TRUE}
+
+# Load tag data
+LoweLab <- readRDS("data/LoweLabTagInfo (1).rds")
+
+# View the structure of the Lowe Lab tag data
+str(LoweLab)
+
+# Merge data from both datasets by the "Transmitter" column
+tag_id_list <- tag_id_list %>%
+    left_join(LoweLab, by = c("Transmitter" = "Transmitter"))
+
+# View the structure of the merged data
+str(tag_id_list)
+
+```
+
+# Merge Nosal Tag ID list with the updated detection data
+```{r Nosal, echo=FALSE}
+
+# Load Nosal data
+Nosal <- readxl::read_xlsx("data/Nosal_Soupfin_Tag_IDs_2024.xlsx")
+
+# View structure of each dataset to determine how to merge
+str(Nosal)
+
+# Which columns have NA values in the Nosal dataset
+colSums(is.na(Nosal))
+
+# Filter unnecessary columns from the Nosal data
+Nosal <- Nosal %>%
+    dplyr::select(-V16_ID, -Code_Space)
+
+    # Add column to Nosal data for "Owner" and make all values "Andrew Nosal"
+    Nosal$Owner <- "Andrew Nosal"
+
+    # Merge the datasets on the Transmitter column
+    tag_id_list <- tag_id_list %>%
+        left_join(Nosal, by = c("Transmitter" = "Tag_ID_Combined"), suffix = c("", ".y")) %>%
+        mutate(Owner = coalesce(Owner, Owner.y)) %>%
+        dplyr::select(-Owner.y)
+
+# View structure of merged data
+str(tag_id_list)
+
+# Use mutate to combine the columns from the two datasets
+
+## mutate SciName
+tag_id_list <- tag_id_list %>%
+    mutate(SciName = if_else(is.na(SciName), Species, SciName)) %>%
+    dplyr::select(-Species)
+
+## mutate TNL_cm
+tag_id_list <- tag_id_list %>%
+    mutate(TNL_cm = if_else(is.na(TNL_cm), TL, TNL_cm)) %>%
+    dplyr::select(-TL)
+
+## mutate sex
+tag_id_list <- tag_id_list %>%
+    mutate(sex = if_else(is.na(sex), Sex, sex)) %>%
+    dplyr::select(-Sex)
+
+## mutate when_encountered
+tag_id_list <- tag_id_list %>%
+    mutate(when_encountered = if_else(is.na(when_encountered), Tagging_Date, when_encountered)) %>%
+    dplyr::select(-Tagging_Date)
+
+## mutate tag_location
+tag_id_list <- tag_id_list %>%
+    mutate(tag_location = if_else(is.na(tag_location), Tagging_Region, tag_location)) %>%
+    dplyr::select(-Tagging_Region)
+
+## mutate Transmitter_SN
+tag_id_list <- tag_id_list %>%
+    mutate(Transmitter_SN = if_else(is.na(Transmitter_SN), V16_SN, Transmitter_SN)) %>%
+    dplyr::select(-V16_SN)
+
+# View the merged data
+str(tag_id_list)
+
+```
+
+# Merge Block Data into tag ID list
+```{r Block, echo=TRUE}
+
+# Load Block data
+Block <- read.csv("data/block_tags_2024june7.csv")
+
+# View structure of each dataset to determine how to merge
+str(Block)
+
+# Which columns have NA values in the Block dataset
+colSums(is.na(Block))
+
+# Add column to Block data for "Owner" and make all values "Barbara Block"
+Block$Owner <- "Barbara Block"
+
+# Add Column to Block data for "SciName" and make all values "Carcharodon carcharias"
+Block$Species <- "Carcharodon carcharias"
+
+# Merge the datasets on the Transmitter column
+tag_id_list <- tag_id_list %>%
+    left_join(Block, by = c("Transmitter" = "codespace"), suffix = c("", ".y")) %>%
+        mutate(Owner = coalesce(Owner, Owner.y)) %>%
+        dplyr::select(-Owner.y)
+
+# View structure of merged data
+str(tag_id_list)
+
+# Change taggingdate to date format
+tag_id_list$taggingdate <- as.Date(tag_id_list$taggingdate, format = "%Y-%m-%d")
+
+## mutate when_encountered
+tag_id_list <- tag_id_list %>%
+    mutate(when_encountered = if_else(is.na(when_encountered), taggingdate, when_encountered)) %>%
+    dplyr::select(-taggingdate)
+
+## mutate SciName
+tag_id_list <- tag_id_list %>%
+    mutate(SciName = if_else(is.na(SciName), Species, SciName)) %>%
+    dplyr::select(-Species)
+
+## mutate TNL_cm
+tag_id_list <- tag_id_list %>%
+    mutate(TNL_cm = if_else(is.na(TNL_cm), tagging_length_cm, TNL_cm)) %>%
+    dplyr::select(-tagging_length_cm)
+
+## mutate tag_location
+tag_id_list <- tag_id_list %>%
+    mutate(tag_location = if_else(is.na(tag_location), seriesname, tag_location)) %>%
+    dplyr::select(-seriesname)
+
+# View the merged data
+str(tag_id_list)
+
+# Remove unnecessary columns
+tag_id_list <- tag_id_list %>%
+    dplyr::select(-c(commonname, eventid))
+
+```
+
+# For Transmitter A69-9001-2552, update the Owner to "Taylor Chapple" and SciName to "Notorynchus cepedianus"
+```{r sevengill, echo=TRUE}
+
+# Update Owner
+tag_id_list <- tag_id_list %>%
+    mutate(Owner = if_else(Transmitter == "A69-9001-2552", "Taylor Chapple", Owner))
+
+# Update SciName
+tag_id_list <- tag_id_list %>%
+    mutate(SciName = if_else(Transmitter == "A69-9001-2552", "Notorynchus cepedianus", SciName))
+
+```
+
+# For Transmitter A69-1601-27071, update the Owner to "Noah Ben-Aderet" and SciName to "Seriola lalandi"
+```{r yellowtail, echo=TRUE}
+
+# Update Owner
+tag_id_list <- tag_id_list %>%
+    mutate(Owner = if_else(Transmitter == "A69-1601-27071", "Noah Ben-Aderet", Owner))
+
+# Update SciName
+tag_id_list <- tag_id_list %>%
+    mutate(SciName = if_else(Transmitter == "A69-1601-27071", "Seriola lalandi", SciName))
+
+```
+
+# Add SciNames from past updated list
+```{r past, echo=TRUE}
+
+# Load past updated tag ID list
+past_tag_id_list <- read.csv("outputs/Updated_Tag_ID_20240611.csv")
+
+# Filter out all columns except for Transmitter and SciName
+past_tag_id_list <- past_tag_id_list %>%
+    dplyr::select(Transmitter, SciName)
+
+# View the structure of the past updated tag ID list
+str(past_tag_id_list)
+
+# Merge the past updated tag ID list with the current tag ID list
+tag_id_list <- tag_id_list %>%
+    left_join(past_tag_id_list, by = "Transmitter", suffix = c("", ".y")) %>%
+    mutate(SciName = coalesce(SciName, SciName.y)) %>%
+    dplyr::select(-SciName.y)
+```
+
+# Save the updated tag ID list
+```{r save}
+
+# Save the updated tag ID list as a .csv file
+write.csv(tag_id_list, "outputs/updated_tag_id_20240621.csv", row.names = FALSE)
+
+# Create table of orphaned tag IDs
+orphaned_tags <- tag_id_list %>%
+    filter(is.na(SciName)) %>%
+    dplyr::select(Transmitter, Days_Detected, First_Detection, Last_Detection)
+
+# View the table
+orphaned_tags
+
+# Save the orphaned tag IDs as a .csv file
+write.csv(orphaned_tags, "outputs/orphaned_tags_20240701.csv", row.names = FALSE)
+
+```
+

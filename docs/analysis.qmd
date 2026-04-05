@@ -23,12 +23,19 @@ Our analysis will pick up from here and further explore the data to identify any
 
 We can start by looking at the number of unique transmitters in the dataset to make sure that the data is complete and that we have all the necessary information to proceed with the analysis.
 
+
 # load necessary libraries
 ```{r load-libraries, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
 
 ```{r packages, warning=FALSE, message=FALSE}
 #install.packages("fuzzyjoin")
-
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+#install.packages("reticulate")
+#install.packages("ggthemes")
+library(ggthemes)
+library(reticulate)
+library(reticulate)
+library(extrafont)
 library(readr)
 library(gganimate)
 library(lubridate)
@@ -56,12 +63,12 @@ library(fuzzyjoin)
 ```{r data-quality-check, echo=TRUE, eval=TRUE}
 
 # Load Sorted Tag ID data
-Tag_Data <- read.csv("data/Updated_Tag_ID_20240611.csv")
+Tag_Data <- read.csv("outputs/updated_tag_id_20240621.csv")
 
 str(Tag_Data)
 
 # Load WCO Reciever Data
-WCO_reciever <- read.csv("data/wco_detections+tags_20240613.csv")
+WCO_reciever <- read.csv("data/wco_detections+tags_20240618.csv")
 
 # count the number of unique transmitters in Tag_Data 
 unique_transmitter_Tag_Data <- Tag_Data %>%
@@ -76,16 +83,23 @@ unique_transmitter_WCO <- WCO_reciever %>%
 print(unique_transmitter_WCO)
 
 
+# Print the names of unique Receivers in the WCO data
+unique_recievers <- WCO_reciever %>%
+  distinct(Receiver) %>%
+  pull(Receiver)
+print(unique_recievers)
+
+print(unique_recievers)
 ```
 
-# We see 253 unique transmitters in the Tag Data and 302 unique transmitters in the WCO data. This is fine because the Tag Data is a subset of the WCO data. We can proceed with the analysis.
+# We see 277 unique transmitters in the Tag Data and 326 unique transmitters in the WCO data. This is fine because the Tag Data is a subset of the WCO data. We can proceed with the analysis.
 
 # Filter for transmitters with less than 2 detections
 ```{r filter-transmitters, echo=TRUE, eval=TRUE}
 
 # Filter for detections > 1
 WCO <- WCO_reciever %>%
-  group_by(Station.Name, Transmitter) %>%
+  group_by(Transmitter) %>%
   filter(n() > 1) %>%
   ungroup()
 
@@ -95,6 +109,946 @@ unique_transmitter_count <- WCO %>%
 
 print(unique_transmitter_count)
 ```
+
+# Cleanup Islands
+```{r cleanup-islands, echo=TRUE, eval=TRUE}
+
+library(dplyr)
+
+# Clean up the Island column by removing the columns with .x and .y
+WCO <- WCO %>%
+  select(-("Island.x"), -("Island.y"))
+  
+
+```
+
+# Set Station Order
+```{r station-order, echo = False}
+
+# Set levels for Islands (West to East)
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland", "Santa Barbara")
+
+# Group by Station and find the longitude and latitude of each
+station_location <- WCO %>%
+  group_by(Station.Name) %>%
+  summarise(Longitude = mean(Longitude, na.rm = TRUE),
+            Latitude = mean(Latitude, na.rm = TRUE))
+
+print(station_location)
+
+# Write .csv file with station locations
+write.csv(station_location, "outputs/station_location.csv")
+
+# Set levels for stations based on longitude (West to East)
+station_order <- station_location %>%
+  arrange(Longitude) %>%
+  pull(Station.Name)
+
+  # Convert Island and Station Name to factors with specified order
+  WCO <- WCO %>%
+    mutate(Island = factor(Island, levels = island_order),
+           Station.Name = factor(Station.Name, levels = station_order))
+
+```
+
+
+# Ok, let's look at the summary statistics for the data
+```{r summary-statistics, echo=TRUE, eval=TRUE}
+
+# When was the first and last detection in the dataset?
+first_detection <- min(WCO$Date)
+last_detection <- max(WCO$Date)
+
+print(first_detection)
+print(last_detection)
+
+# Detections per station
+detections_per_station <- WCO %>%
+  group_by(Station.Name) %>%
+  summarise(Detections = n())
+
+# Add latitude and longitude data to detections_per_station
+detections_per_station <- left_join(detections_per_station, station_location, by = "Station.Name")
+
+  # Add Island data to detections_per_station
+  detections_per_station <- left_join(detections_per_station, WCO %>% dplyr::select(Station.Name, Island) %>% distinct(), by = "Station.Name")
+
+print(detections_per_station)
+
+# Export to CSV
+write.csv(detections_per_station, "outputs/detections_per_station.csv")
+
+# Filter out sttions associated with Santa Barbara
+detections_per_station_no_sb <- detections_per_station %>%
+  filter(Island != "Santa Barbara")
+
+print(detections_per_station_no_sb)
+
+# Export to CSV
+write.csv(detections_per_station_no_sb, "outputs/detections_per_station_no_sb.csv")
+
+# Bar plot for Detections per Station
+ggplot(detections_per_station, aes(x = Station.Name, y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Station", x = "Station Name", y = "Detections") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Detections per Island
+detections_per_island <- WCO %>%
+  group_by(Island) %>%
+  summarise(Detections = n())
+
+print(detections_per_island)
+
+# Bar plot for Detections per Island
+ggplot(detections_per_island, aes(x = Island, y = Detections)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Detections per Island", x = "Island", y = "Detections") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+  # Let's look at detections per species in the WCO data 
+  detections_per_species <- WCO %>%
+    filter(!is.na(SciName)) %>%
+    filter(Island != "Santa Barbara") %>%
+    group_by(SciName) %>%
+    summarise(Detections = n()) %>%
+    arrange(desc(Detections))
+
+  print(detections_per_species)
+
+  # Plot Detections per Species
+detections_per_species_plot <- ggplot(detections_per_species, aes(x = reorder(SciName, -Detections), y = Detections)) +
+  geom_bar(stat = "identity", fill = "#095558") +
+  theme_classic() +
+  labs(title = NULL, x = "Species", y = "Detections") +
+  theme(text = element_text(family = "Arial"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+        axis.title = element_text(size = 30),
+        axis.text.y = element_text(size = 25)) +
+  scale_x_discrete(labels = c("Giant Sea Bass", "White Shark", "Soupfin Shark", "Sevengill Shark","Bat Ray",  "Yellowtail Amberjack", "Leopard Shark")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+print(detections_per_species_plot)
+
+# Save plot as image file
+ggsave("outputs/Detections_per_Species.png", plot = detections_per_species_plot, width = 10, height = 8, dpi = 300, units = "in")
+
+# Let's look at transmitters per species in the WCO data
+transmitters_per_species <- WCO %>%
+  filter(!is.na(SciName)) %>%
+  group_by(SciName) %>%
+  summarise(Transmitters = n_distinct(Transmitter)) %>%
+  arrange(desc(Transmitters))
+
+print(transmitters_per_species)
+
+# Transmitters per species
+transmitters_per_species_plot <- ggplot(transmitters_per_species, aes(x = reorder(SciName, -Transmitters), y = Transmitters)) +
+  geom_bar(stat = "identity", fill = "#244056") +
+  theme_minimal() +
+  labs(x = "Species", y = "Transmitters") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 15, color = "white"),
+        axis.title = element_text(size = 20, color = "white"),
+        axis.text.y = element_text(size = 15, color = "white"),
+        plot.background = element_rect(fill = "#5d9fba"),
+        panel.background = element_rect(fill = "#5d9fba"),
+        axis.line = element_line(color = "white"),
+        axis.ticks = element_line(color = "white"),
+        axis.ticks.length = unit(0.3, "cm"),
+        axis.ticks.margin = unit(0.3, "cm"),
+        axis.ticks.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y.left = element_blank(),
+        axis.ticks.x.bottom = element_blank(),
+        axis.ticks.y.right = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.ticks.length.y = unit(0.3, "cm"),
+        axis.ticks.length.x = unit(0.3, "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
+  scale_x_discrete(labels = c("White Shark", "Soupfin Shark", "Bat Ray", "Leopard Shark", "Yellowtail Amberjack", "Sevengill Shark", "Giant Sea Bass", "Shovelnose Guitarfish")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+print(transmitters_per_species_plot)
+
+# Save plot as image file
+ggsave("outputs/Transmitters_per_Species.png", plot = transmitters_per_species_plot, width = 10, height = 6, dpi = 300, units = "in")
+
+# Let's look at the size range and number of transmitters of Carcharodon carcharias associated with each tag Owner
+Carcharodon_summary <- WCO %>%
+  filter(SciName == "Carcharodon carcharias") %>%
+  group_by(Owner) %>%
+  summarise(num_transmitters = n_distinct(Transmitter),
+            avg_TNL_cm = mean(TNL_cm, na.rm = TRUE),
+            se_TNL_cm = sd(TNL_cm, na.rm = TRUE) / sqrt(sum(!is.na(TNL_cm))),
+            num_detections = n())
+
+print(Carcharodon_summary)
+
+# Let's make the same summary table for Galeorhinus galeus
+Galeorhinus_summary <- WCO %>%
+  filter(SciName == "Galeorhinus galeus") %>%
+  group_by(Owner) %>%
+  summarise(num_transmitters = n_distinct(Transmitter),
+            avg_TNL_cm = mean(TNL_cm, na.rm = TRUE),
+            se_TNL_cm = sd(TNL_cm, na.rm = TRUE) / sqrt(sum(!is.na(TNL_cm))),
+            num_detections = n())
+
+print(Galeorhinus_summary)
+
+# Do the same for Mylobatis californica
+Myliobatis_summary <- WCO %>%
+  filter(SciName == "Myliobatis californica") %>%
+  group_by(Owner) %>%
+  summarise(num_transmitters = n_distinct(Transmitter),
+            avg_disk_length = mean(disk_length, na.rm = TRUE),
+            se_disk_length = sd(disk_length, na.rm = TRUE) / sqrt(sum(!is.na(disk_length))),
+            num_detections = n())
+
+print(Myliobatis_summary)
+
+# Do the same for Triakis semifasciata
+Triakis_summary <- WCO %>%
+  filter(SciName == "Triakis semifasciata") %>%
+  group_by(Owner) %>%
+  summarise(num_transmitters = n_distinct(Transmitter),
+            avg_TNL_cm = mean(TNL_cm, na.rm = TRUE),
+            se_TNL_cm = sd(TNL_cm, na.rm = TRUE) / sqrt(sum(!is.na(TNL_cm))),
+            num_detections = n())
+
+            # Let's look at the TNL_cm size of each individual for Triakis semifasciata
+Triakis_individuals <- WCO %>%
+  filter(SciName == "Triakis semifasciata") %>%
+  group_by(Transmitter) %>%
+  reframe(TNL_cm = TNL_cm,
+          num_detections = n())
+
+print(Triakis_individuals)
+
+print(Triakis_summary)
+
+# Do the same for Seriola lalandi
+Seriola_summary <- WCO %>%
+  filter(SciName == "Seriola lalandi") %>%
+  group_by(Owner) %>%
+  summarise(num_transmitters = n_distinct(Transmitter),
+            avg_TNL_cm = mean(TNL_cm, na.rm = TRUE),
+            se_TNL_cm = sd(TNL_cm, na.rm = TRUE) / sqrt(sum(!is.na(TNL_cm))),
+            num_detections = n())
+
+            # look at all the transmitters associated with Seriola lalandi
+Seriola_individuals <- WCO %>%
+  filter(SciName == "Seriola lalandi") %>% 
+  group_by(Transmitter) %>%
+  summarise(num_detections = n()) %>%
+  dplyr::select(Transmitter)
+
+print(Seriola_individuals)
+
+print(Seriola_summary)
+
+
+```
+
+## Map Spatial Data
+```{r map-spatial-data, echo=TRUE, eval=TRUE}
+  # Read the shapefiles
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+
+# Create map showing station loacations
+map_stations <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +  # Add the coastline shapefile with thicker line
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +  
+  geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +  # Plot the islands
+  geom_point(data = detections_per_station %>% filter(Island != "Santa Barbara"), aes(x = Longitude, y = Latitude), color = "#08C6F4", size = 7, shape = 19, stroke = 1) +  # Plot points in one color and size with black outline
+  theme(legend.position = "none") +  # Remove legends
+  coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +  # Set boundaries
+  theme_map() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+    panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),  # Add gridlines with decreased width
+    panel.grid.minor = element_blank(),  # Remove minor gridlines
+    axis.text.y = element_text(color = "black", size = 25)  # Add labels for latitude
+  ) +
+  labs(title = NULL, x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+  scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4))
+
+print(map_stations)
+
+# Export the map as an image file
+ggsave("outputs/map_stations.png", plot = map_stations, width = 15, height = 10, dpi = 300, units = "in")
+
+# Create the scatter plot for detections per station with shapefile
+map_total_detections <- ggplot() +
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = sanctuary, fill = "gray90", color = "black") +  
+  geom_sf(data = islands, fill = "gray70", color = "black") +  # Plot the islands
+  geom_point(data = detections_per_station, aes(x = Longitude, y = Latitude, color = Detections), size = 3) +
+  scale_color_viridis_c(limits = c(0, max(detections_per_station$Detections))) +  # Color gradient with appropriate limits
+  coord_sf(xlim = c(-120.65, -118.9), ylim = c(33.3, 34.42)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+   panel.background = element_rect(fill = "white", color = NA),  # White background
+   plot.background = element_rect(fill = "white", color = NA),   # White plot background
+   axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = "Detections per Station", x = "Longitude", y = "Latitude", color = "Detections")
+
+print(map_total_detections)
+
+# Now make the same map with detections associated with santa barbara filtered out
+map_total_detections_no_sb <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +  # Add the coastline shapefile with thicker line
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "#B2B2B2") +  
+  geom_sf(data = islands, fill = "#B2B2B2", color = "#D7E6F9") +  # Plot the islands
+  geom_point(data = detections_per_station %>% filter(Island != "Santa Barbara"), aes(x = Longitude, y = Latitude, color = Detections, size = Detections), shape = 16) +
+  scale_color_gradient(low = "blue", high = "red", guide = guide_colorbar(title = "Detections", label = list(size = 40)), name = "Detections") +  # Color gradient with yellow as low and red as high
+  scale_size(range = c(3, 8), guide = "none") +  # Size range for points
+  theme(legend.position = "bottom") +  # Combine legends at the bottom
+  coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +  # Set boundaries
+  theme_map() +
+  theme(
+    legend.title = element_text(size = 25),
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+    panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),  # Add gridlines with decreased width
+    panel.grid.minor = element_blank(),  # Remove minor gridlines
+    axis.text.y = element_text(color = "black", size = 25),  # Add labels for latitude
+    legend.text = element_text(size = 15)  # Increase text size for legend
+  ) +
+  labs(title = NULL, x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+  scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4))
+
+print(map_total_detections_no_sb)
+
+# Export the map as an image file
+ggsave("outputs/map_total_detections_no_sb.png", plot = map_total_detections_no_sb, width = 15, height = 10, dpi = 300, units = "in")
+
+# Now make the same map with detections associated with santa barbara filtered out
+map_total_detections_sb <- ggplot() +
+  geom_sf(data = coast, color = "black") +  # Add the coastline shapefile
+  geom_sf(data = sanctuary, fill = "gray80", color = "black") +  # Plot the islands
+  geom_point(data = detections_per_station %>% filter(Island == "Santa Barbara"), aes(x = Longitude, y = Latitude, color = Detections, size = Detections), shape = 16) +
+  scale_color_viridis_c(limits = c(0, 200000), guide = guide_colorbar(title = "Detections"), name = "Detections") +  # Color gradient with appropriate limits and colorbar title
+  scale_size(range = c(3, 8), name = "Detections") +  # Size range for points
+  theme(legend.position = "bottom") +  # Combine legends at the bottom
+  coord_sf(xlim = c(-119.015, -119.07), ylim = c(33.46, 33.5)) +  # Set boundaries
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),  # White background
+    plot.background = element_rect(fill = "white", color = NA),   # White plot background
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(title = NULL, x = "Longitude", y = "Latitude")
+
+print(map_total_detections_sb)
+
+```
+
+# Summary Stats for species
+
+## For each individual transmitter, we want to find the days at liberty so that we can standardize the detections and compare movement and behavior without bias from the length of time the transmitter was active in the study.
+
+### Days at liberty is calculated:
+\text{{Days at liberty}} = \text{{last detection date}} - \text{{tagging date}}
+
+```{r days-at-liberty, echo=TRUE, eval=TRUE}
+
+# First, we need to convert First_Detection, Last_Detection, and when_encountered to Date format in the WCO dataframe
+WCO <- WCO %>%
+  mutate(First_Detection = as.Date(First_Detection, format = "%Y-%m-%d"),
+         Last_Detection = as.Date(Last_Detection, format = "%Y-%m-%d"),
+         when_encountered = as.Date(when_encountered, format = "%Y-%m-%d"))
+
+
+# Calculate the days at liberty for each individual transmitter
+WCO <- WCO %>%
+  mutate(Days_at_liberty = Last_Detection - when_encountered)
+
+  # Let's see which unique SciNames we have a Days_at_liberty for and which are NA
+unique_days_at_liberty <- WCO %>%
+  group_by(SciName) %>%
+  summarise(Days_at_liberty = sum(!is.na(Days_at_liberty)))
+
+print(unique_days_at_liberty)
+```
+
+## We are going to look deeper at some general trends including the Residency Index (RI) among groups and the maximum daily displacement for each individual. 
+
+### Calculate the Residency Index (RI) for each species:
+#### As described in Gong et al. (2023) the Residency Index (RI) is calculated as: 
+
+```{r setup, echo=FALSE}
+reticulate::py_install("matplotlib", envname = "r-reticulate")
+```
+
+```{python}
+
+import matplotlib.pyplot as plt
+
+# Corrected LaTeX equation without $ symbols
+equation = r"$\text{RI} = \frac{\text{Days detected at a particular station}}{\text{Total detection days}}$"
+
+# Create a figure and axis with no frame
+fig = plt.figure(figsize=(10, 2))
+ax = fig.add_subplot(111)
+ax.axis('off')
+
+# Render the equation
+ax.text(0.5, 0.5, equation, fontsize=15, ha='center', va='center')
+
+# Save the figure as an image
+fig.savefig("outputs/equation_RI.png", dpi=300, bbox_inches='tight')
+```
+
+#### The RI was "calculated regionally for each individual and then averaged by species, where an RI of 0 indicated low residence and an RI of 1 indicated high residence." Here, we will calculate the RI for each individual and then evaluate trends among groups (sex, life stage, species).
+
+```{r RI, echo=TRUE, eval=TRUE}
+
+# Calculate the number of unique days each individual was detected at each station
+station_days <- WCO %>%
+  group_by(Transmitter, Station.Name) %>%
+  summarise(Days_at_Station = n_distinct(Date), .groups = "drop")
+
+# Calculate the total number of unique days each individual was detected
+total_days <- WCO %>%
+  group_by(Transmitter) %>%
+  summarise(Total_Days = n_distinct(Date), .groups = "drop")
+
+# Join the two dataframes together
+RI_WCO <- left_join(station_days, total_days, by = "Transmitter")
+
+# Calculate the Residency Index (RI) for each individual at each station
+RI_WCO <- RI_WCO %>%
+  mutate(RI = Days_at_Station / Total_Days)
+
+  # Check to make sure RI was calculated correctly by looking at summary statistics
+summary(RI_WCO$RI)
+
+# Add RI column to the WCO dataframe
+WCO <- WCO %>%
+  left_join(RI_WCO %>% dplyr::select(Transmitter, Station.Name, RI), by = c("Transmitter", "Station.Name"))
+
+  ```
+
+  ### Calculate the Maximum daily displacement for each individual:
+
+  #### The maximum daily displacement is calculated as the maximum distance detected among transmitters on a given day for each individual. 
+
+  ```{r MDD, echo=TRUE, eval=TRUE}
+
+# Calculate the distance between consecutive detections for each individual on each day
+distances <- WCO %>%
+  arrange(Transmitter, Date) %>%
+  group_by(Transmitter, Date) %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  mutate(Distance = distVincentySphere(matrix(c(Longitude, Latitude), ncol = 2), 
+                                       matrix(c(lead(Longitude), lead(Latitude)), ncol = 2)) / 1000)
+
+# Find the total distance swam for each individual on each day
+total_daily_displacement <- distances %>%
+  group_by(Transmitter, Date) %>%
+  summarise(Total_Distance = sum(Distance, na.rm = TRUE), .groups = "drop")
+
+# Filter out any unrealistic values
+total_daily_displacement <- total_daily_displacement %>%
+  filter(Total_Distance < 2000)
+
+# Check to make sure total_daily_displacement was calculated correctly by looking at summary statistics. 
+summary(total_daily_displacement$Total_Distance)
+
+# Assign each transmitter a maximum daily displacement in the Filtered_Carcharodon dataframe
+WCO <- WCO %>%
+  left_join(total_daily_displacement, by = c("Transmitter", "Date"))
+  
+  ```
+
+  ## Summary Stats for species
+
+  ### For the species in the WCO data, we will look at the Residency Index (RI) and Maximum Daily Displacement (MDD). 
+  ```{r summary-stats-species, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+
+install.packages("ggforce")
+  library(ggforce)
+
+  # Reorder the factor levels for SciName
+WCO$SciName <- factor(WCO$SciName, levels = c("Galeorhinus galeus", 
+                         "Carcharodon carcharias", "Triakis semifasciata", "Stereolepis gigas", "Myliobatis californica",
+                         "Notorynchus cepedianus",
+                         "Seriola lalandi"))
+
+# Histogram of Residency Index (RI) for each species
+RI_hist <- ggplot(WCO %>% filter(!is.na(SciName) & Island != "Santa Barbara"), aes(x = RI)) +
+  geom_histogram(fill = "#095558", color = "black", bins = 30) +
+  facet_wrap(~SciName, scales = "free", ncol = 3, 
+             labeller = labeller(SciName = c("Triakis semifasciata" = "Leopard Shark", 
+                                             "Stereolepis gigas" = "Giant Sea Bass", 
+                                             "Notorynchus cepedianus" = "Sevengill Shark", 
+                                             "Galeorhinus galeus" = "Soupfin Shark", 
+                                             "Seriola lalandi" = "Yellowtail Amberjack", 
+                                             "Myliobatis californica" = "Bat Ray", 
+                                             "Carcharodon carcharias" = "White Shark"))) +
+  theme_classic() +
+  labs(title = NULL, x = "Residency Index", y = "Frequency") +
+  theme(text = element_text(family = "Arial", size = 25),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+        axis.title = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        strip.text = element_text(face = "bold")) + # Make species names bold
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_x_continuous(limits = c(0, 1.05), breaks = seq(0, 1, by = 0.25), expand = expansion(mult = c(0, 0.05))) +
+  geom_vline(data = WCO %>% filter(!is.na(SciName)) %>% group_by(SciName) %>% summarize(Average_RI = mean(RI)), aes(xintercept = Average_RI), color = "red", linetype = "solid", linewidth = 2) +
+  geom_vline(data = WCO %>% filter(!is.na(SciName)) %>% group_by(SciName) %>% summarize(Median_RI = median(RI)), aes(xintercept = Median_RI), color = "blue", linetype = "solid", linewidth = 2)
+
+
+print(RI_hist)
+
+ggsave("outputs/RI_Hist_pub.png", plot = RI_hist, width = 15, height = 10, dpi = 300, units = "in")
+
+# Let's run an ANOVA test to see if the RI values are signifigantly different among species
+
+
+# Print the results
+print(shapiro_test)
+
+# Histogram of Maximum Daily Displacement (MDD) for each species
+MDD_hist <- ggplot(WCO %>% filter(SciName %in% c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")), aes(x = Total_Distance)) +
+  geom_histogram(fill = "#095558", color = "black", bins = 30) +
+  facet_wrap(~SciName, scales = "free") +
+  theme_classic() +
+  labs(title = NULL, x = "Cumulative Daily Distance (km)", y = "Frequency") +
+  theme(text = element_text(family = "Baskerville", size = 25),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+        axis.title = element_text(size = 30),
+        axis.text.y = element_text(size = 25)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)))
+
+print(MDD_hist)
+
+ggsave("outputs/Daily_Distance.png", plot = MDD_hist, width = 15, height = 10, dpi = 300, units = "in")
+
+```
+
+# Represent the same RI data as a fasceted map for each species
+```{r RI-map, echo=TRUE, eval=TRUE}
+
+  # Read the shapefiles
+sanctuary <- st_read("data/cinms_py2/cinms_py.shp")
+coast <- st_read("data/stanford-vx275xn8886-shapefile/vx275xn8886.shp")
+islands <- st_read("data/California_Counties/California_Counties.shp")
+
+# Reorder the factor levels for SciName
+WCO$SciName <- factor(WCO$SciName, levels = c("Galeorhinus galeus", 
+                         "Carcharodon carcharias", "Triakis semifasciata", "Stereolepis gigas", "Myliobatis californica",
+                         "Notorynchus cepedianus",
+                         "Seriola lalandi"))
+
+# Create the base map with faceting by SciName
+map_RI_faceted <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+  geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+  geom_point(data = WCO %>% filter(!is.na(SciName) & SciName != "Pseudobatos productus"), aes(x = Longitude, y = Latitude, color = RI, size = RI), shape = 16) +
+  scale_color_gradient(low = "blue", high = "red", guide = guide_colorbar(title = "Residency Index", label = list(size = 40), direction = "horizontal", barwidth = 15, barheight = 3, title.position = "top", title.hjust = 0.5, title.vjust = 0.5), name = "Residency Index") +
+  scale_size(range = c(3, 8), guide = "none") +
+  facet_wrap(~SciName, ncol = 3, labeller = labeller(SciName = c("Triakis semifasciata" = "Leopard Shark", 
+                                                                 "Stereolepis gigas" = "Giant Sea Bass", 
+                                                                 "Notorynchus cepedianus" = "Sevengill Shark", 
+                                                                 "Galeorhinus galeus" = "Soupfin Shark", 
+                                                                 "Seriola lalandi" = "Yellowtail Amberjack", 
+                                                                 "Myliobatis californica" = "Bat Ray", 
+                                                                 "Carcharodon carcharias" = "White Shark"))) +
+  coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +
+  theme_map() +
+  theme(
+    legend.position.inside = c(0.95, 0.05),
+    legend.justification = c(1, 0),
+    legend.box.just = "right",
+    legend.title = element_text(size = 25),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+    panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(color = "black", size = 20),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(face = "bold", size = 20)
+  ) +
+  labs(title = NULL, x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+  scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4))
+
+print(map_RI_faceted)
+
+# Export the map as an image file
+ggsave("outputs/map_RI_faceted.png", plot = map_RI_faceted, width = 15, height = 10, dpi = 300, units = "in")
+
+# Let's find the detections during the highest MDD day for transmitter A69-9002-4561 and oserve the location and time of each detection on a map that day. 
+
+# Filter the data for the highest MDD day for transmitter A69-9002-4561
+highest_MDD_day <- WCO %>%
+  filter(Transmitter == "A69-9002-4561") %>%
+  group_by(Date) %>%
+  summarise(Max_MDD = max(Total_Distance)) %>%
+  filter(Max_MDD == max(Max_MDD))
+
+  highest_MDD_day
+
+# Highest MDD day for transmitter A69-9002-4561 is 2021-10-30
+
+## Make a map of the detections for the highest MDD day for transmitter A69-9002-4561
+
+# Filter the data for the highest MDD day for transmitter A69-9002-4561
+highest_MDD_day_data <- WCO %>%
+  filter(Transmitter == "A69-9002-4561", Date == "2021-10-30") %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  arrange(Local_Time) %>%
+  select(Local_Time, Latitude, Longitude)
+
+  highest_MDD_day_data
+
+# Create the map of detections for the highest MDD day for transmitter A69-9002-4561
+map_highest_MDD_day <- ggplot() +
+  geom_sf(data = coast, color = "#D7E6F9", size = 1.5) +
+  geom_sf(data = sanctuary, fill = "#D7E6F9", color = "grey40") +
+  geom_sf(data = islands, fill = "#B2B2B2", color = "grey40") +
+  geom_point(data = highest_MDD_day_data[1:2, ], aes(x = Longitude, y = Latitude, color = as.factor(1:2)), size = 7) +
+  scale_color_manual(values = c("green", "red"), guide = guide_legend(title = "Point Order")) +
+  coord_sf(xlim = c(-120.62, -119.27), ylim = c(33.81, 34.42)) +
+  theme_map() +
+  theme(
+    legend.position = "bottomleft",
+    legend.title = element_text(size = 25),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+    panel.grid.major = element_line(color = "black", linetype = "solid", size = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(color = "black", size = 20),
+    legend.text = element_text(size = 20)
+  ) +
+  labs(title = NULL, x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-120.4, -119.6, by = 0.4)) +
+  scale_y_continuous(breaks = seq(33.9, 34.4, by = 0.4))
+
+print(map_highest_MDD_day)
+
+# Export the map as an image file
+ggsave("outputs/map_highest_MDD_day.png", plot = map_highest_MDD_day, width = 15, height = 10, dpi = 300, units = "in")
+
+```
+
+### For "Carcharodon carcharias", "Galeorhinus galeus", and "Myliobatis californica", let's take a look at the detections per season
+```{r species-seasonal, echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+
+# Average RI per season with SE
+average_ri_season <- WCO %>%
+  filter(SciName %in% c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")) %>%
+  group_by(SciName, Season) %>%
+  summarise(Average_RI = mean(RI), SE = sd(RI)/sqrt(n()), .groups = "drop")
+
+  # Plot average RI per season
+  species_seasonal_ri_plot <- ggplot(average_ri_season, aes(x = Season, y = Average_RI, fill = SciName)) +
+    geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black") +
+    geom_errorbar(aes(ymin = Average_RI - SE, ymax = Average_RI + SE), width = 0.2, position = position_dodge(width = 0.7)) +
+    theme_classic() +
+    labs(title = NULL, x = "Season", y = "Residency Index") +
+    theme(text = element_text(family = "Baskerville", size = 30),
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+          axis.title = element_text(size = 30),
+          axis.text.y = element_text(size = 25)) +
+    scale_x_discrete(limits = c("Spring", "Summer", "Fall", "Winter")) +
+    scale_fill_manual(values = c("#93E9BE", "#095558", "#71FBFF"),
+                      labels = c("White Shark", "Soupfin Shark", "Bat Ray")) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    labs(fill = "Species")
+
+print(species_seasonal_ri_plot)
+
+# Save plot as image file
+ggsave("outputs/Species_Seasonal_RI.png", plot = species_seasonal_ri_plot, width = 15, height = 10, dpi = 300, units = "in")
+
+# Set up Month Column in the WCO dataframe
+
+## Convert Month column to character
+WCO$Month <- as.character(WCO$Month)
+
+# Replace the month numbers with the month names
+WCO$Month <- recode(WCO$Month, "1" = "January",
+                    "2" = "February",
+                    "3" = "March",
+                    "4" = "April",
+                    "5" = "May",
+                    "6" = "June",
+                    "7" = "July",
+                    "8" = "August",
+                    "9" = "September",
+                    "10" = "October",
+                    "11" = "November",
+                    "12" = "December")
+
+# Set month order to be January to December
+WCO$Month <- factor(WCO$Month, levels = c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"))
+
+## Check the updated Month column
+unique(WCO$Month)
+
+# Average RI per Month with SE
+average_ri_month <- WCO %>%
+  filter(SciName %in% c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")) %>%
+  group_by(SciName, Month) %>%
+  summarise(Average_RI = mean(RI), SE = sd(RI)/sqrt(n()), .groups = "drop")
+
+# Plot average RI per month
+species_monthly_ri_plot <- ggplot(average_ri_month, aes(x = Month, y = Average_RI, fill = SciName)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black") +
+  geom_errorbar(aes(ymin = Average_RI - SE, ymax = Average_RI + SE), width = 0.2, position = position_dodge(width = 0.7)) +
+  theme_classic() +
+  labs(title = NULL, x = "Month", y = "Residency Index") +
+  theme(text = element_text(family = "Baskerville", size = 30),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+        axis.title = element_text(size = 30),
+        axis.text.y = element_text(size = 25)) +
+  scale_fill_manual(values = c("#93E9BE", "#095558", "#71FBFF"),
+                    labels = c("White Shark", "Soupfin Shark", "Bat Ray")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    labs(fill = "Species")
+
+
+print(species_monthly_ri_plot)
+
+# Save plot as image file
+ggsave("outputs/Species_Monthly_RI.png", plot = species_monthly_ri_plot, width = 15, height = 10, dpi = 300, units = "in")
+
+## Convert Year column to character
+WCO$Year <- as.character(WCO$Year)
+
+# Average RI per Year with SE
+average_ri_year <- WCO %>%
+  filter(SciName %in% c("Carcharodon carcharias", "Galeorhinus galeus", "Myliobatis californica")) %>%
+  group_by(SciName, Year) %>%
+  summarise(Average_RI = mean(RI), SE = sd(RI)/sqrt(n()), .groups = "drop")
+
+# Plot average RI per year
+species_yearly_ri_plot <- ggplot(average_ri_year, aes(x = Year, y = Average_RI, fill = SciName)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black") +
+  geom_errorbar(aes(ymin = Average_RI - SE, ymax = Average_RI + SE), width = 0.2, position = position_dodge(width = 0.7)) +
+  theme_classic() +
+  labs(title = NULL, x = "Year", y = "Residency Index") +
+  theme(text = element_text(family = "Baskerville", size = 30),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 25),
+        axis.title = element_text(size = 30),
+        axis.text.y = element_text(size = 25)) +
+  scale_fill_manual(values = c("#93E9BE", "#095558", "#71FBFF"),
+                    labels = c("White Shark", "Soupfin Shark", "Bat Ray")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    labs(fill = "Species")
+
+print(species_yearly_ri_plot)
+
+# Save plot as image file
+ggsave("outputs/Species_Yearly_RI.png", plot = species_yearly_ri_plot, width = 15, height = 10, dpi = 300, units = "in")
+
+```
+
+### Summary Stats for table comparing species
+```{r summary-table-species, echo=TRUE, eval=TRUE}
+
+# Summary table for species
+
+Species_table <- WCO %>%
+  filter(!is.na(SciName)) %>%
+  group_by(SciName) %>%
+  summarise(
+    Min_Days_at_Liberty = min(Days_at_liberty, na.rm = TRUE),
+    Max_Days_at_Liberty = max(Days_at_liberty, na.rm = TRUE),
+    Max_Detection_Span = max(as.numeric(Last_Detection - First_Detection), na.rm = TRUE), 
+    Min_Detection_Span = min(as.numeric(Last_Detection - First_Detection), na.rm = TRUE),
+    Average_RI = mean(RI, na.rm = TRUE),
+    SE_RI = sd(RI, na.rm = TRUE) / sqrt(n()),
+    Max_MDD = max(Total_Distance, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Max_MDD))
+
+Species_table
+
+Species_table_filtered <- WCO %>%
+  filter(!is.na(SciName) & Days_at_liberty < 11000) %>%
+  group_by(SciName) %>%
+  summarise(
+    Min_Days_at_Liberty = min(Days_at_liberty, na.rm = TRUE),
+    Max_Days_at_Liberty = max(Days_at_liberty, na.rm = TRUE),
+    Max_Detection_Span = max(as.numeric(Last_Detection - First_Detection), na.rm = TRUE) / 365, # Convert to years
+    Min_Detection_Span = min(as.numeric(Last_Detection - First_Detection), na.rm = TRUE) / 365, # Convert to years
+    Average_RI = mean(RI, na.rm = TRUE),
+    SE_RI = sd(RI, na.rm = TRUE) / sqrt(n()),
+    Max_MDD = max(Total_Distance, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Max_MDD))
+
+# I want to look a a summary of days at liberty for each transmitter among the Carcharodon carcharias species
+Carcharodon_days_at_liberty <- WCO %>%
+  filter(SciName == "Carcharodon carcharias" & !is.na(Days_at_liberty) & Days_at_liberty < 11000) %>% 
+  group_by(Transmitter) %>%
+  summarise(Days_at_liberty = max(Days_at_liberty),
+            when_encountered = max(when_encountered),
+            Last_detection = max(Last_Detection)) %>%
+  arrange(desc(Days_at_liberty)) %>%
+  ungroup()
+
+Carcharodon_days_at_liberty
+
+
+```
+
+### Summary Stats for each species
+
+```{r summary-table-species, echo=TRUE, eval=TRUE}
+
+# Summary table for species
+
+# Filter the dataset for the specific species
+Carcharodon_RI_Table <- WCO %>%
+  filter(SciName == "Carcharodon carcharias") %>%
+  group_by(Transmitter) %>%
+  summarise(
+    Max_Detection_Span = max(as.numeric(Last_Detection - First_Detection, na.rm = TRUE))/365, # Convert to years
+    Average_RI = mean(RI, na.rm = TRUE),
+    NA,
+    SE_RI = sd(RI, na.rm = TRUE) / sqrt(n()),
+    Max_MDD = max(Total_Distance, na.rm = TRUE),
+    Sex = unique(sex),
+    TNL_cm = unique(TNL_cm)
+  ) %>%
+  filter(Max_Detection_Span >= 0.02) %>%
+  arrange(desc(Max_MDD))
+
+
+Carcharodon_RI_Table
+
+# Export the table to a CSV file
+write.csv(Carcharodon_RI_Table, "outputs/Carcharodon_RI_Table.csv")
+
+# Filter the dataset for the specific species
+Galeorhinus_RI_Table <- WCO %>%
+  filter(SciName == "Galeorhinus galeus") %>%
+  group_by(Transmitter) %>%
+  summarise(
+    Max_Detection_Span = max(as.numeric(Last_Detection - First_Detection, na.rm = TRUE))/365, # Convert to years
+    Average_RI = mean(RI, na.rm = TRUE),
+    NA,
+    SE_RI = sd(RI, na.rm = TRUE) / sqrt(n()),
+    Max_MDD = max(Total_Distance, na.rm = TRUE),
+    Sex = unique(sex),
+    TNL_cm = unique(TNL_cm)
+  ) %>%
+  filter(Max_Detection_Span >= 0.02) %>%
+  arrange(desc(Max_MDD))
+
+Galeorhinus_RI_Table
+
+# Export the table to a CSV file
+write.csv(Galeorhinus_RI_Table, "outputs/Galeorhinus_RI_Table.csv")
+
+# Filter the dataset for the specific species
+Myliobatis_RI_Table <- WCO %>%
+  filter(SciName == "Myliobatis californica") %>%
+  group_by(Transmitter) %>%
+  summarise(
+    Max_Detection_Span = max(as.numeric(Last_Detection - First_Detection, na.rm = TRUE))/365, # Convert to years
+    Average_RI = mean(RI, na.rm = TRUE),
+    NA,
+    SE_RI = sd(RI, na.rm = TRUE) / sqrt(n()),
+    Max_MDD = max(Total_Distance, na.rm = TRUE),
+    Sex = unique(sex),
+    disk_length = unique(disk_length)
+  ) %>%
+  filter(Max_Detection_Span >= 0.02) %>%
+  arrange(desc(Max_MDD))
+
+
+Myliobatis_RI_Table
+
+# Export the table to a CSV file
+write.csv(Myliobatis_RI_Table, "outputs/Myliobatis_RI_Table.csv")
+
+# Let's also make a .csv table for Myliobatis californica ID's to share with the Lowe Lab team
+Myliobatis_IDs <- WCO %>%
+  filter(SciName == "Myliobatis californica") %>%
+  select(Transmitter) %>%
+  distinct() %>%
+  arrange(Transmitter)
+
+  Myliobatis_IDs
+
+# Export the table to a CSV file
+write.csv(Myliobatis_IDs, "outputs/Myliobatis_IDs.csv")
+```
+
+# Now, we will investigate our research question for Carcharodon carcharias
+
+## Research Question: Do sexually mature male and female white sharks share habitats within the CINMS?
+
+### We will create an abacus plot to visualize the movement patterns of Carcharodon carcharias that are more than 330 TNL_cm in the CINMS. The plot will be binned by month with the islands on the y axis and months on the x axis. Colors will represent sex of individuals. 
+
+```{r abacus-Carcharodon, echo=TRUE, eval=TRUE}
+
+# Filter for Carcharodon carcharias with non-NA sex, sex is M or F, and TNL_cm greater than 180
+Filtered_Carcharodon_adult <- WCO %>%
+  filter(SciName == "Carcharodon carcharias", !is.na(sex), sex %in% c("M", "F"), TNL_cm > 180)
+
+# Create a vector of custom colors for sex of individuals
+custom_colors <- c("#FF7F50", "#095558")
+
+# Create abacus plot with the Month on the x axis and island on the y axis in order (Santa Barbara, Mainland, Anacapa, Santa Cruz, Santa Rosa, San Miguel) and all the individuals labeled with unique colors.
+Carcharodon_abacus <- ggplot(Filtered_Carcharodon_adult, aes(x = Month, y = factor(Island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland", "Santa Barbara")), color = sex, size = RI)) +
+  geom_jitter(width = 0.5, height = 0.3, alpha = 1) +
+  geom_point() +
+  scale_color_manual(values = custom_colors) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # Increase size of x-axis text
+        axis.text.y = element_text(size = 12), # Increase size of y-axis text
+        axis.title = element_text(size = 14), # Increase size of axis titles
+        plot.title = element_text(hjust = 0.5, size = 16), # Increase size of plot title
+        legend.text = element_text(size = 12), # Increase size of legend text
+        legend.title = element_text(size = 14)) + # Increase size of legend title
+  labs(title = "Abacus Plot for Carcharodon carcharias (Adults)",
+       x = "Month",
+       y = "Island",
+       color = "Sex",
+       size = "RI") +
+  guides(color = guide_legend(title = "Sex"),
+         size = guide_legend(title = "RI")) +
+  scale_x_discrete(limits = c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")) +
+  scale_y_discrete(limits = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland", "Santa Barbara")) +
+  theme(legend.position = "bottom") +
+  theme(legend.box = "horizontal") +
+  scale_size(range = c(0.5, 3))
+
+print(Carcharodon_abacus)
+
+# Save plot as image file
+ggsave("outputs/Abacus_Plot_Carcharodon.png", plot = Carcharodon_abacus, width = 15, height = 10, dpi = 300, units = "in")
+
+```
+
+
+  ```{r summary-stats-species, echo=TRUE, eval=TRUE}
 
 # Abacus Plots for Species
 
@@ -679,3 +1633,4 @@ Abacus_mcoh <- ggplot(male_cohort, aes(x = factor(`Station.Name`, levels = stati
 print(Abacus_mcoh)
 ggsave("outputs/Abacus_Male_Cohort.png", plot = Abacus_mcoh, width = 10, height = 15, dpi = 300, units = "in")
 ```
+

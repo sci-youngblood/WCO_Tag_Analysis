@@ -22,13 +22,14 @@ library(tidyr)
 # Read in the WCO data
 ```{r}
 
-tag_data <- read_csv("data/Updated_Tag_ID_20240611.csv")
+tag_data <- read_csv("outputs/updated_tag_id_20240621.csv")
 str(tag_data)
 
 
-wco_raw <- read_csv("data/og_detection-data_cinms-wco_20231024_01.csv")
+wco_raw <- read_csv("data/hollings_detection-data_cinms_wco_20240617.csv")
 str(wco_raw)
 problems(wco_raw)
+head(wco_raw)
 ```
 
 # WCO Data Cleaning and Setup
@@ -86,6 +87,12 @@ wco_clean <- wco_clean %>%
   group_by(Date) %>%
   filter(n() > 1)
 
+  # Filter for detections > 1
+wco_clean <- wco_clean %>%
+  group_by(Transmitter) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
 # Evaluate the number of detections filtered
 nrow(wco_clean)
 nrow(wco_raw)
@@ -140,7 +147,7 @@ island_station_count <- wco_clean %>%
 island_station_count
 
 # Set levels for Islands (West to East)
-island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Santa Barbara", "Mainland")
+island_order <- c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa", "Mainland", "Santa Barbara")
 
 # Group by Station and find the longitude and latitude of each
 station_location <- wco_clean %>%
@@ -173,6 +180,41 @@ wco_merged <- left_join(wco_clean, tag_data, by = "Transmitter")
 str(wco_merged)
 
 # Export the merged dataset to a CSV file
-write_csv(wco_merged, "data/wco_detections+tags_20240613.csv")
+write_csv(wco_merged, "data/wco_detections+tags_20240618.csv")
 
+```
+
+# let's look for orphaned tag IDs in the WCO data to see if we can identify unique recievers and months associated with the detection data to make a vrl file package. 
+```{r}
+
+# Create a new dataset with unique transmitters and the list of unique month-year combos detected, including Station.Name
+orphaned_transmitter_months <- wco_merged %>%
+  filter(is.na(SciName)) %>%
+  group_by(Transmitter, Receiver, Year, Month) %>%
+  summarise(Month_Year = paste(Year, Month, sep = "-"), 
+            Station.Name = first(`Station Name`), # Assuming `Station Name` is unique or taking the first one
+            .groups = 'drop') %>%
+  ungroup() %>%
+  select(Transmitter, Month_Year, Receiver, Station.Name) %>%
+  distinct() %>%
+  arrange(Month_Year)
+
+View(orphaned_transmitter_months)
+
+# Export the orphaned transmitter months to a CSV file
+write_csv(orphaned_transmitter_months, "outputs/orphaned_transmitter_months_20240701.csv")
+
+# Determine the number of unique Receiver-Month_Year combinations in the dataset
+unique(paste(orphaned_transmitter_months$Month_Year, orphaned_transmitter_months$Receiver)) %>% length()
+
+# Make a list of these unique combinations
+unique_receiver <- unique(paste(orphaned_transmitter_months$Month_Year, orphaned_transmitter_months$Receiver))
+
+# make a dataframe of the unique receiver-month-year combinations
+unique_receiver <- data.frame(unique_receiver)
+
+View(unique_receiver)
+
+# Export the unique receiver-month-year combinations to a CSV file
+write_csv(unique_receiver, "outputs/unique_receiver_month_year_20240701.csv")
 ```
